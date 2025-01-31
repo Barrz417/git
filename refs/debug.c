@@ -83,9 +83,8 @@ static void print_update(int i, const char *refname,
 
 static void print_transaction(struct ref_transaction *transaction)
 {
-	int i;
 	trace_printf_key(&trace_refs, "transaction {\n");
-	for (i = 0; i < transaction->nr; i++) {
+	for (size_t i = 0; i < transaction->nr; i++) {
 		struct ref_update *u = transaction->updates[i];
 		print_update(i, u->refname, &u->old_oid, &u->new_oid, u->flags,
 			     u->type, u->msg);
@@ -115,18 +114,6 @@ static int debug_transaction_abort(struct ref_store *refs,
 	int res;
 	transaction->ref_store = drefs->refs;
 	res = drefs->refs->be->transaction_abort(drefs->refs, transaction, err);
-	return res;
-}
-
-static int debug_initial_transaction_commit(struct ref_store *refs,
-					    struct ref_transaction *transaction,
-					    struct strbuf *err)
-{
-	struct debug_ref_store *drefs = (struct debug_ref_store *)refs;
-	int res;
-	transaction->ref_store = drefs->refs;
-	res = drefs->refs->be->initial_transaction_commit(drefs->refs,
-							  transaction, err);
 	return res;
 }
 
@@ -419,6 +406,16 @@ static int debug_reflog_expire(struct ref_store *ref_store, const char *refname,
 	return res;
 }
 
+static int debug_fsck(struct ref_store *ref_store,
+		      struct fsck_options *o,
+		      struct worktree *wt)
+{
+	struct debug_ref_store *drefs = (struct debug_ref_store *)ref_store;
+	int res = drefs->refs->be->fsck(drefs->refs, o, wt);
+	trace_printf_key(&trace_refs, "fsck: %d\n", res);
+	return res;
+}
+
 struct ref_storage_be refs_be_debug = {
 	.name = "debug",
 	.init = NULL,
@@ -434,7 +431,6 @@ struct ref_storage_be refs_be_debug = {
 	.transaction_prepare = debug_transaction_prepare,
 	.transaction_finish = debug_transaction_finish,
 	.transaction_abort = debug_transaction_abort,
-	.initial_transaction_commit = debug_initial_transaction_commit,
 
 	.pack_refs = debug_pack_refs,
 	.rename_ref = debug_rename_ref,
@@ -451,4 +447,6 @@ struct ref_storage_be refs_be_debug = {
 	.create_reflog = debug_create_reflog,
 	.delete_reflog = debug_delete_reflog,
 	.reflog_expire = debug_reflog_expire,
+
+	.fsck = debug_fsck,
 };

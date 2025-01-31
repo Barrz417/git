@@ -1,3 +1,6 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
 #include "config.h"
 #include "commit.h"
@@ -120,7 +123,7 @@ static inline void finish_object__ma(struct object *obj)
 		return;
 
 	case MA_ALLOW_PROMISOR:
-		if (is_promisor_object(&obj->oid))
+		if (is_promisor_object(the_repository, &obj->oid))
 			return;
 		die("unexpected missing %s object '%s'",
 		    type_name(obj->type), oid_to_hex(&obj->oid));
@@ -484,6 +487,13 @@ static int try_bitmap_traversal(struct rev_info *revs,
 	if (revs->max_count >= 0)
 		return -1;
 
+	/*
+	 * We can't know which commits were left/right in a single traversal,
+	 * and we don't yet know how to traverse them separately.
+	 */
+	if (revs->left_right)
+		return -1;
+
 	bitmap_git = prepare_bitmap_walk(revs, filter_provided_objects);
 	if (!bitmap_git)
 		return -1;
@@ -508,10 +518,15 @@ static int try_bitmap_disk_usage(struct rev_info *revs,
 
 	size_from_bitmap = get_disk_usage_from_bitmap(bitmap_git, revs);
 	print_disk_usage(size_from_bitmap);
+
+	free_bitmap_index(bitmap_git);
 	return 0;
 }
 
-int cmd_rev_list(int argc, const char **argv, const char *prefix)
+int cmd_rev_list(int argc,
+		 const char **argv,
+		 const char *prefix,
+		 struct repository *repo UNUSED)
 {
 	struct rev_info revs;
 	struct rev_list_info info;
@@ -527,8 +542,7 @@ int cmd_rev_list(int argc, const char **argv, const char *prefix)
 	const char *show_progress = NULL;
 	int ret = 0;
 
-	if (argc == 2 && !strcmp(argv[1], "-h"))
-		usage(rev_list_usage);
+	show_usage_if_asked(argc, argv, rev_list_usage);
 
 	git_config(git_default_config, NULL);
 	repo_init_revisions(the_repository, &revs, prefix);
@@ -720,7 +734,8 @@ int cmd_rev_list(int argc, const char **argv, const char *prefix)
 		revs.limited = 1;
 
 	if (show_progress)
-		progress = start_delayed_progress(show_progress, 0);
+		progress = start_delayed_progress(the_repository,
+						  show_progress, 0);
 
 	if (use_bitmap_index) {
 		if (!try_bitmap_count(&revs, filter_provided_objects))

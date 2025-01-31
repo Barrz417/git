@@ -550,7 +550,7 @@ The following pseudorefs are known to Git:
 	to the result.
 
 [[def_ref]]ref::
-	A name that that points to an <<def_object_name,object name>> or
+	A name that points to an <<def_object_name,object name>> or
 	another ref (the latter is called a <<def_symref,symbolic ref>>).
 	For convenience, a ref can sometimes be abbreviated when used
 	as an argument to a Git command; see linkgit:gitrevisions[7]
@@ -695,6 +695,11 @@ the `refs/tags/` hierarchy is used to represent local tags..
 	and inexpensive, it is often desirable to have several small branches
 	that each contain very well defined concepts or small incremental yet
 	related changes.
+
+[[def_trailer]]trailer::
+	Key-value metadata.  Trailers are optionally found at the end of
+	a commit message.  Might be called "footers" or "tags" in other
+	communities.  See linkgit:git-interpret-trailers[1].
 
 [[def_tree]]tree::
 	Either a <<def_working_tree,working tree>>, or a <<def_tree_object,tree

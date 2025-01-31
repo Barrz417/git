@@ -1,3 +1,5 @@
+#define USE_THE_REPOSITORY_VARIABLE
+
 #include "git-compat-util.h"
 #include "gettext.h"
 #include "hex.h"
@@ -152,6 +154,7 @@ static int promisor_remote_config(const char *var, const char *value,
 		if (!r)
 			return 0;
 
+		FREE_AND_NULL(r->partial_clone_filter);
 		return git_config_string(&r->partial_clone_filter, var, value);
 	}
 
@@ -187,6 +190,7 @@ void promisor_remote_clear(struct promisor_remote_config *config)
 {
 	while (config->promisors) {
 		struct promisor_remote *r = config->promisors;
+		free(r->partial_clone_filter);
 		config->promisors = config->promisors->next;
 		free(r);
 	}
@@ -279,7 +283,7 @@ void promisor_remote_get_direct(struct repository *repo,
 	}
 
 	for (i = 0; i < remaining_nr; i++) {
-		if (is_promisor_object(&remaining_oids[i]))
+		if (is_promisor_object(repo, &remaining_oids[i]))
 			die(_("could not fetch %s from promisor remote"),
 			    oid_to_hex(&remaining_oids[i]));
 	}

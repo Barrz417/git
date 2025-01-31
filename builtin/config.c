@@ -1,10 +1,10 @@
+#define USE_THE_REPOSITORY_VARIABLE
 #include "builtin.h"
 #include "abspath.h"
 #include "config.h"
 #include "color.h"
 #include "editor.h"
 #include "environment.h"
-#include "repository.h"
 #include "gettext.h"
 #include "ident.h"
 #include "parse-options.h"
@@ -17,9 +17,9 @@
 
 static const char *const builtin_config_usage[] = {
 	N_("git config list [<file-option>] [<display-option>] [--includes]"),
-	N_("git config get [<file-option>] [<display-option>] [--includes] [--all] [--regexp=<regexp>] [--value=<value>] [--fixed-value] [--default=<default>] <name>"),
+	N_("git config get [<file-option>] [<display-option>] [--includes] [--all] [--regexp] [--value=<value>] [--fixed-value] [--default=<default>] <name>"),
 	N_("git config set [<file-option>] [--type=<type>] [--all] [--value=<value>] [--fixed-value] <name> <value>"),
-	N_("git config unset [<file-option>] [--all] [--value=<value>] [--fixed-value] <name> <value>"),
+	N_("git config unset [<file-option>] [--all] [--value=<value>] [--fixed-value] <name>"),
 	N_("git config rename-section [<file-option>] <old-name> <new-name>"),
 	N_("git config remove-section [<file-option>] <name>"),
 	N_("git config edit [<file-option>]"),
@@ -43,7 +43,7 @@ static const char *const builtin_config_set_usage[] = {
 };
 
 static const char *const builtin_config_unset_usage[] = {
-	N_("git config unset [<file-option>] [--all] [--value=<value>] [--fixed-value] <name> <value>"),
+	N_("git config unset [<file-option>] [--all] [--value=<value>] [--fixed-value] <name>"),
 	NULL
 };
 
@@ -807,8 +807,8 @@ static void location_options_init(struct config_location_options *opts,
 	else
 		opts->options.respect_includes = opts->respect_includes_opt;
 	if (startup_info->have_repository) {
-		opts->options.commondir = get_git_common_dir();
-		opts->options.git_dir = get_git_dir();
+		opts->options.commondir = repo_get_common_dir(the_repository);
+		opts->options.git_dir = repo_get_git_dir(the_repository);
 	}
 }
 
@@ -826,7 +826,8 @@ static void display_options_init(struct config_display_options *opts)
 	}
 }
 
-static int cmd_config_list(int argc, const char **argv, const char *prefix)
+static int cmd_config_list(int argc, const char **argv, const char *prefix,
+			   struct repository *repo UNUSED)
 {
 	struct config_location_options location_opts = CONFIG_LOCATION_OPTIONS_INIT;
 	struct config_display_options display_opts = CONFIG_DISPLAY_OPTIONS_INIT;
@@ -861,7 +862,8 @@ static int cmd_config_list(int argc, const char **argv, const char *prefix)
 	return 0;
 }
 
-static int cmd_config_get(int argc, const char **argv, const char *prefix)
+static int cmd_config_get(int argc, const char **argv, const char *prefix,
+			  struct repository *repo UNUSED)
 {
 	struct config_location_options location_opts = CONFIG_LOCATION_OPTIONS_INIT;
 	struct config_display_options display_opts = CONFIG_DISPLAY_OPTIONS_INIT;
@@ -915,7 +917,8 @@ static int cmd_config_get(int argc, const char **argv, const char *prefix)
 	return ret;
 }
 
-static int cmd_config_set(int argc, const char **argv, const char *prefix)
+static int cmd_config_set(int argc, const char **argv, const char *prefix,
+			  struct repository *repo UNUSED)
 {
 	struct config_location_options location_opts = CONFIG_LOCATION_OPTIONS_INIT;
 	const char *value_pattern = NULL, *comment_arg = NULL;
@@ -973,7 +976,8 @@ static int cmd_config_set(int argc, const char **argv, const char *prefix)
 	return ret;
 }
 
-static int cmd_config_unset(int argc, const char **argv, const char *prefix)
+static int cmd_config_unset(int argc, const char **argv, const char *prefix,
+			    struct repository *repo UNUSED)
 {
 	struct config_location_options location_opts = CONFIG_LOCATION_OPTIONS_INIT;
 	const char *value_pattern = NULL;
@@ -1010,7 +1014,8 @@ static int cmd_config_unset(int argc, const char **argv, const char *prefix)
 	return ret;
 }
 
-static int cmd_config_rename_section(int argc, const char **argv, const char *prefix)
+static int cmd_config_rename_section(int argc, const char **argv, const char *prefix,
+				     struct repository *repo UNUSED)
 {
 	struct config_location_options location_opts = CONFIG_LOCATION_OPTIONS_INIT;
 	struct option opts[] = {
@@ -1026,8 +1031,8 @@ static int cmd_config_rename_section(int argc, const char **argv, const char *pr
 	location_options_init(&location_opts, prefix);
 	check_write(&location_opts.source);
 
-	ret = git_config_rename_section_in_file(location_opts.source.file,
-						argv[0], argv[1]);
+	ret = repo_config_rename_section_in_file(the_repository, location_opts.source.file,
+						 argv[0], argv[1]);
 	if (ret < 0)
 		goto out;
 	else if (!ret)
@@ -1039,7 +1044,8 @@ out:
 	return ret;
 }
 
-static int cmd_config_remove_section(int argc, const char **argv, const char *prefix)
+static int cmd_config_remove_section(int argc, const char **argv, const char *prefix,
+				     struct repository *repo UNUSED)
 {
 	struct config_location_options location_opts = CONFIG_LOCATION_OPTIONS_INIT;
 	struct option opts[] = {
@@ -1055,8 +1061,8 @@ static int cmd_config_remove_section(int argc, const char **argv, const char *pr
 	location_options_init(&location_opts, prefix);
 	check_write(&location_opts.source);
 
-	ret = git_config_rename_section_in_file(location_opts.source.file,
-						argv[0], NULL);
+	ret = repo_config_rename_section_in_file(the_repository, location_opts.source.file,
+						 argv[0], NULL);
 	if (ret < 0)
 		goto out;
 	else if (!ret)
@@ -1099,7 +1105,8 @@ static int show_editor(struct config_location_options *opts)
 	return 0;
 }
 
-static int cmd_config_edit(int argc, const char **argv, const char *prefix)
+static int cmd_config_edit(int argc, const char **argv, const char *prefix,
+			   struct repository *repo UNUSED)
 {
 	struct config_location_options location_opts = CONFIG_LOCATION_OPTIONS_INIT;
 	struct option opts[] = {
@@ -1353,8 +1360,8 @@ static int cmd_config_actions(int argc, const char **argv, const char *prefix)
 	else if (actions == ACTION_RENAME_SECTION) {
 		check_write(&location_opts.source);
 		check_argc(argc, 2, 2);
-		ret = git_config_rename_section_in_file(location_opts.source.file,
-							argv[0], argv[1]);
+		ret = repo_config_rename_section_in_file(the_repository, location_opts.source.file,
+							 argv[0], argv[1]);
 		if (ret < 0)
 			goto out;
 		else if (!ret)
@@ -1365,8 +1372,8 @@ static int cmd_config_actions(int argc, const char **argv, const char *prefix)
 	else if (actions == ACTION_REMOVE_SECTION) {
 		check_write(&location_opts.source);
 		check_argc(argc, 1, 1);
-		ret = git_config_rename_section_in_file(location_opts.source.file,
-							argv[0], NULL);
+		ret = repo_config_rename_section_in_file(the_repository, location_opts.source.file,
+							 argv[0], NULL);
 		if (ret < 0)
 			goto out;
 		else if (!ret)
@@ -1392,7 +1399,10 @@ out:
 	return ret;
 }
 
-int cmd_config(int argc, const char **argv, const char *prefix)
+int cmd_config(int argc,
+	       const char **argv,
+	       const char *prefix,
+	       struct repository *repo)
 {
 	parse_opt_subcommand_fn *subcommand = NULL;
 	struct option subcommand_opts[] = {
@@ -1419,7 +1429,7 @@ int cmd_config(int argc, const char **argv, const char *prefix)
 	if (subcommand) {
 		argc = parse_options(argc, argv, prefix, subcommand_opts, builtin_config_usage,
 		       PARSE_OPT_SUBCOMMAND_OPTIONAL|PARSE_OPT_KEEP_UNKNOWN_OPT);
-		return subcommand(argc, argv, prefix);
+		return subcommand(argc, argv, prefix, repo);
 	}
 
 	return cmd_config_actions(argc, argv, prefix);

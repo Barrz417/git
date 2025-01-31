@@ -6,6 +6,9 @@
  * an insanely large number of attributes.
  */
 
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "git-compat-util.h"
 #include "config.h"
 #include "environment.h"
@@ -185,7 +188,7 @@ static void all_attrs_init(struct attr_hashmap *map, struct attr_check *check)
 }
 
 /*
- * Atribute name cannot begin with "builtin_" which
+ * Attribute name cannot begin with "builtin_" which
  * is a reserved namespace for built in attributes values.
  */
 static int attr_name_reserved(const char *name)
@@ -257,42 +260,6 @@ const struct git_attr *git_attr(const char *name)
 	return git_attr_internal(name, strlen(name));
 }
 
-/* What does a matched pattern decide? */
-struct attr_state {
-	const struct git_attr *attr;
-	const char *setto;
-};
-
-struct pattern {
-	const char *pattern;
-	int patternlen;
-	int nowildcardlen;
-	unsigned flags;		/* PATTERN_FLAG_* */
-};
-
-/*
- * One rule, as from a .gitattributes file.
- *
- * If is_macro is true, then u.attr is a pointer to the git_attr being
- * defined.
- *
- * If is_macro is false, then u.pat is the filename pattern to which the
- * rule applies.
- *
- * In either case, num_attr is the number of attributes affected by
- * this rule, and state is an array listing them.  The attributes are
- * listed as they appear in the file (macros unexpanded).
- */
-struct match_attr {
-	union {
-		struct pattern pat;
-		const struct git_attr *attr;
-	} u;
-	char is_macro;
-	size_t num_attr;
-	struct attr_state state[FLEX_ARRAY];
-};
-
 static const char blank[] = " \t\r\n";
 
 /* Flags usable in read_attr() and parse_attr_line() family of functions. */
@@ -351,8 +318,8 @@ static const char *parse_attr(const char *src, int lineno, const char *cp,
 	return ep + strspn(ep, blank);
 }
 
-static struct match_attr *parse_attr_line(const char *line, const char *src,
-					  int lineno, unsigned flags)
+struct match_attr *parse_attr_line(const char *line, const char *src,
+				   int lineno, unsigned flags)
 {
 	size_t namelen, num_attr, i;
 	const char *cp, *name, *states;
@@ -865,7 +832,8 @@ static struct attr_stack *read_attr_from_index(struct index_state *istate,
 		stack = read_attr_from_blob(istate, &istate->cache[sparse_dir_pos]->oid, relative_path, flags);
 	} else {
 		buf = read_blob_data_from_index(istate, path, &size);
-		stack = read_attr_from_buf(buf, size, path, flags);
+		if (buf)
+			stack = read_attr_from_buf(buf, size, path, flags);
 	}
 	return stack;
 }

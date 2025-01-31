@@ -5,7 +5,6 @@
 
 test_description='Test git update-ref and basic ref logging'
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 Z=$ZERO_OID
@@ -1838,10 +1837,10 @@ do
 
 	test_expect_success "stdin $type create dangling symref ref works" '
 		test_when_finished "git symbolic-ref -d refs/heads/symref" &&
-		format_command $type "symref-create refs/heads/symref" "refs/heads/unkown" >stdin &&
+		format_command $type "symref-create refs/heads/symref" "refs/heads/unknown" >stdin &&
 		git update-ref --stdin $type --no-deref <stdin &&
 		git symbolic-ref refs/heads/symref >expect &&
-		echo refs/heads/unkown >actual &&
+		echo refs/heads/unknown >actual &&
 		test_cmp expect actual
 	'
 
@@ -2068,5 +2067,14 @@ do
 	'
 
 done
+
+test_expect_success 'update-ref should also create reflog for HEAD' '
+	test_commit to-rewind &&
+	git rev-parse HEAD >expect &&
+	head=$(git symbolic-ref HEAD) &&
+	git update-ref --create-reflog "$head" HEAD~ &&
+	git rev-parse HEAD@{1} >actual &&
+	test_cmp expect actual
+'
 
 test_done

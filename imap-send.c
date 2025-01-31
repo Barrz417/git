@@ -21,6 +21,9 @@
  *  along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "git-compat-util.h"
 #include "config.h"
 #include "credential.h"
@@ -29,9 +32,6 @@
 #include "parse-options.h"
 #include "setup.h"
 #include "strbuf.h"
-#if defined(NO_OPENSSL) && !defined(HAVE_OPENSSL_CSPRNG)
-typedef void *SSL;
-#endif
 #ifdef USE_CURL_FOR_IMAP_SEND
 #include "http.h"
 #endif
@@ -83,7 +83,11 @@ struct imap_server_conf {
 
 struct imap_socket {
 	int fd[2];
+#if defined(NO_OPENSSL) && !defined(HAVE_OPENSSL_CSPRNG)
+	void *ssl;
+#else
 	SSL *ssl;
+#endif
 };
 
 struct imap_buffer {
@@ -190,7 +194,7 @@ static void socket_perror(const char *func, struct imap_socket *sock, int ret)
 
 #ifdef NO_OPENSSL
 static int ssl_socket_connect(struct imap_socket *sock UNUSED,
-			      const struct imap_server_conf *cfg,
+			      const struct imap_server_conf *cfg UNUSED,
 			      int use_tls_only UNUSED)
 {
 	fprintf(stderr, "SSL requested but SSL support not compiled in\n");
@@ -665,12 +669,12 @@ static int parse_response_code(struct imap_store *ctx, struct imap_cmd_cb *cb,
 		return RESP_BAD;
 	}
 	if (!strcmp("UIDVALIDITY", arg)) {
-		if (!(arg = next_arg(&s)) || !(ctx->uidvalidity = atoi(arg))) {
+		if (!(arg = next_arg(&s)) || strtol_i(arg, 10, &ctx->uidvalidity) || !ctx->uidvalidity) {
 			fprintf(stderr, "IMAP error: malformed UIDVALIDITY status\n");
 			return RESP_BAD;
 		}
 	} else if (!strcmp("UIDNEXT", arg)) {
-		if (!(arg = next_arg(&s)) || !(imap->uidnext = atoi(arg))) {
+		if (!(arg = next_arg(&s)) || strtol_i(arg, 10, &imap->uidnext) || !imap->uidnext) {
 			fprintf(stderr, "IMAP error: malformed NEXTUID status\n");
 			return RESP_BAD;
 		}
@@ -683,8 +687,8 @@ static int parse_response_code(struct imap_store *ctx, struct imap_cmd_cb *cb,
 		for (; isspace((unsigned char)*p); p++);
 		fprintf(stderr, "*** IMAP ALERT *** %s\n", p);
 	} else if (cb && cb->ctx && !strcmp("APPENDUID", arg)) {
-		if (!(arg = next_arg(&s)) || !(ctx->uidvalidity = atoi(arg)) ||
-		    !(arg = next_arg(&s)) || !(*(int *)cb->ctx = atoi(arg))) {
+		if (!(arg = next_arg(&s)) || strtol_i(arg, 10, &ctx->uidvalidity) || !ctx->uidvalidity ||
+		    !(arg = next_arg(&s)) || strtol_i(arg, 10, (int *)cb->ctx) || !cb->ctx) {
 			fprintf(stderr, "IMAP error: malformed APPENDUID status\n");
 			return RESP_BAD;
 		}
@@ -770,7 +774,10 @@ static int get_cmd_result(struct imap_store *ctx, struct imap_cmd *tcmd)
 			if (!tcmd)
 				return DRV_OK;
 		} else {
-			tag = atoi(arg);
+			if (strtol_i(arg, 10, &tag)) {
+				fprintf(stderr, "IMAP error: malformed tag %s\n", arg);
+				return RESP_BAD;
+			}
 			for (pcmdp = &imap->in_progress; (cmdp = *pcmdp); pcmdp = &cmdp->next)
 				if (cmdp->tag == tag)
 					goto gottag;
@@ -915,7 +922,7 @@ static void server_fill_credential(struct imap_server_conf *srvc, struct credent
 	cred->username = xstrdup_or_null(srvc->user);
 	cred->password = xstrdup_or_null(srvc->pass);
 
-	credential_fill(cred, 1);
+	credential_fill(the_repository, cred, 1);
 
 	if (!srvc->user)
 		srvc->user = xstrdup(cred->username);
@@ -1116,7 +1123,7 @@ static struct imap_store *imap_open_store(struct imap_server_conf *srvc, const c
 	} /* !preauth */
 
 	if (cred.username)
-		credential_approve(&cred);
+		credential_approve(the_repository, &cred);
 	credential_clear(&cred);
 
 	/* check the target mailbox exists */
@@ -1143,7 +1150,7 @@ static struct imap_store *imap_open_store(struct imap_server_conf *srvc, const c
 
 bail:
 	if (cred.username)
-		credential_reject(&cred);
+		credential_reject(the_repository, &cred);
 	credential_clear(&cred);
 
  out:
@@ -1414,15 +1421,11 @@ static CURL *setup_curl(struct imap_server_conf *srvc, struct credential *cred)
 	curl_easy_setopt(curl, CURLOPT_PORT, srvc->port);
 
 	if (srvc->auth_method) {
-#ifndef GIT_CURL_HAVE_CURLOPT_LOGIN_OPTIONS
-		warning("No LOGIN_OPTIONS support in this cURL version");
-#else
 		struct strbuf auth = STRBUF_INIT;
 		strbuf_addstr(&auth, "AUTH=");
 		strbuf_addstr(&auth, srvc->auth_method);
 		curl_easy_setopt(curl, CURLOPT_LOGIN_OPTIONS, auth.buf);
 		strbuf_release(&auth);
-#endif
 	}
 
 	if (!srvc->use_ssl)
@@ -1489,9 +1492,9 @@ static int curl_append_msgs_to_imap(struct imap_server_conf *server,
 
 	if (cred.username) {
 		if (res == CURLE_OK)
-			credential_approve(&cred);
+			credential_approve(the_repository, &cred);
 		else if (res == CURLE_LOGIN_DENIED)
-			credential_reject(&cred);
+			credential_reject(the_repository, &cred);
 	}
 
 	credential_clear(&cred);

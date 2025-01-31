@@ -7,11 +7,10 @@
  * and Carlos Rica <jasampler@gmail.com> that was itself based on
  * git-tag.sh and mktag.c by Linus Torvalds.
  */
-
+#define USE_THE_REPOSITORY_VARIABLE
 #include "builtin.h"
 #include "config.h"
 #include "editor.h"
-#include "environment.h"
 #include "gettext.h"
 #include "hex.h"
 #include "refs.h"
@@ -22,7 +21,6 @@
 #include "object-name.h"
 #include "object-store-ll.h"
 #include "replace-object.h"
-#include "repository.h"
 #include "tag.h"
 #include "wildmatch.h"
 
@@ -49,6 +47,7 @@ struct show_data {
 };
 
 static int show_reference(const char *refname,
+			  const char *referent UNUSED,
 			  const struct object_id *oid,
 			  int flag UNUSED, void *cb_data)
 {
@@ -167,7 +166,7 @@ static int check_ref_valid(struct object_id *object,
 		return error(_("'%s' is not a valid ref name"), ref->buf);
 
 	if (refs_read_ref(get_main_ref_store(the_repository), ref->buf, prev))
-		oidclr(prev);
+		oidclr(prev, the_repository->hash_algo);
 	else if (!force)
 		return error(_("replace ref '%s' already exists"), ref->buf);
 	return 0;
@@ -202,7 +201,7 @@ static int replace_object_oid(const char *object_ref,
 	}
 
 	transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-						  &err);
+						  0, &err);
 	if (!transaction ||
 	    ref_transaction_update(transaction, ref.buf, repl, &prev,
 				   NULL, NULL, 0, NULL, &err) ||
@@ -513,7 +512,7 @@ static int create_graft(int argc, const char **argv, int force, int gentle)
 
 static int convert_graft_file(int force)
 {
-	const char *graft_file = get_graft_file(the_repository);
+	const char *graft_file = repo_get_graft_file(the_repository);
 	FILE *fp = fopen_or_warn(graft_file, "r");
 	struct strbuf buf = STRBUF_INIT, err = STRBUF_INIT;
 	struct strvec args = STRVEC_INIT;
@@ -544,7 +543,10 @@ static int convert_graft_file(int force)
 	return -1;
 }
 
-int cmd_replace(int argc, const char **argv, const char *prefix)
+int cmd_replace(int argc,
+		const char **argv,
+		const char *prefix,
+		struct repository *repo UNUSED)
 {
 	int force = 0;
 	int raw = 0;

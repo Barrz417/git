@@ -5,12 +5,14 @@
  *
  */
 
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
 #include "config.h"
 #include "gettext.h"
 #include "lockfile.h"
 #include "quote.h"
-#include "repository.h"
 #include "cache-tree.h"
 #include "parse-options.h"
 #include "entry.h"
@@ -208,7 +210,10 @@ static int option_parse_stage(const struct option *opt,
 	return 0;
 }
 
-int cmd_checkout_index(int argc, const char **argv, const char *prefix)
+int cmd_checkout_index(int argc,
+		       const char **argv,
+		       const char *prefix,
+		       struct repository *repo UNUSED)
 {
 	int i;
 	struct lock_file lock_file = LOCK_INIT;
@@ -245,9 +250,9 @@ int cmd_checkout_index(int argc, const char **argv, const char *prefix)
 		OPT_END()
 	};
 
-	if (argc == 2 && !strcmp(argv[1], "-h"))
-		usage_with_options(builtin_checkout_index_usage,
-				   builtin_checkout_index_options);
+	show_usage_with_options_if_asked(argc, argv,
+					 builtin_checkout_index_usage,
+					 builtin_checkout_index_options);
 	git_config(git_default_config, NULL);
 	prefix_length = prefix ? strlen(prefix) : 0;
 

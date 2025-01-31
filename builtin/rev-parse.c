@@ -4,7 +4,11 @@
  * Copyright (C) Linus Torvalds, 2005
  */
 
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
+
 #include "abspath.h"
 #include "config.h"
 #include "commit.h"
@@ -19,6 +23,8 @@
 #include "path.h"
 #include "diff.h"
 #include "read-cache-ll.h"
+#include "repo-settings.h"
+#include "repository.h"
 #include "revision.h"
 #include "setup.h"
 #include "split-index.h"
@@ -211,7 +217,7 @@ static int show_default(void)
 	return 0;
 }
 
-static int show_reference(const char *refname, const struct object_id *oid,
+static int show_reference(const char *refname, const char *referent UNUSED, const struct object_id *oid,
 			  int flag UNUSED, void *cb_data UNUSED)
 {
 	if (ref_excluded(&ref_excludes, refname))
@@ -220,7 +226,7 @@ static int show_reference(const char *refname, const struct object_id *oid,
 	return 0;
 }
 
-static int anti_reference(const char *refname, const struct object_id *oid,
+static int anti_reference(const char *refname, const char *referent UNUSED, const struct object_id *oid,
 			  int flag UNUSED, void *cb_data UNUSED)
 {
 	show_rev(REVERSED, oid, refname);
@@ -423,12 +429,12 @@ static char *findspace(const char *s)
 
 static int cmd_parseopt(int argc, const char **argv, const char *prefix)
 {
-	static int keep_dashdash = 0, stop_at_non_option = 0;
-	static char const * const parseopt_usage[] = {
+	int keep_dashdash = 0, stop_at_non_option = 0;
+	char const * const parseopt_usage[] = {
 		N_("git rev-parse --parseopt [<options>] -- [<args>...]"),
 		NULL
 	};
-	static struct option parseopt_opts[] = {
+	struct option parseopt_opts[] = {
 		OPT_BOOL(0, "keep-dashdash", &keep_dashdash,
 					N_("keep the `--` passed as an arg")),
 		OPT_BOOL(0, "stop-at-non-option", &stop_at_non_option,
@@ -438,12 +444,11 @@ static int cmd_parseopt(int argc, const char **argv, const char *prefix)
 					N_("output in stuck long form")),
 		OPT_END(),
 	};
-	static const char * const flag_chars = "*=?!";
-
 	struct strbuf sb = STRBUF_INIT, parsed = STRBUF_INIT;
-	const char **usage = NULL;
+	struct strvec longnames = STRVEC_INIT;
+	struct strvec usage = STRVEC_INIT;
 	struct option *opts = NULL;
-	int onb = 0, osz = 0, unb = 0, usz = 0;
+	size_t opts_nr = 0, opts_alloc = 0;
 
 	strbuf_addstr(&parsed, "set --");
 	argc = parse_options(argc, argv, prefix, parseopt_opts, parseopt_usage,
@@ -453,16 +458,16 @@ static int cmd_parseopt(int argc, const char **argv, const char *prefix)
 
 	/* get the usage up to the first line with a -- on it */
 	for (;;) {
+		strbuf_reset(&sb);
 		if (strbuf_getline(&sb, stdin) == EOF)
 			die(_("premature end of input"));
-		ALLOC_GROW(usage, unb + 1, usz);
 		if (!strcmp("--", sb.buf)) {
-			if (unb < 1)
+			if (!usage.nr)
 				die(_("no usage string given before the `--' separator"));
-			usage[unb] = NULL;
 			break;
 		}
-		usage[unb++] = strbuf_detach(&sb, NULL);
+
+		strvec_push(&usage, sb.buf);
 	}
 
 	/* parse: (<short>|<short>,<long>|<long>)[*=?!]*<arghint>? SP+ <help> */
@@ -474,10 +479,10 @@ static int cmd_parseopt(int argc, const char **argv, const char *prefix)
 		if (!sb.len)
 			continue;
 
-		ALLOC_GROW(opts, onb + 1, osz);
-		memset(opts + onb, 0, sizeof(opts[onb]));
+		ALLOC_GROW(opts, opts_nr + 1, opts_alloc);
+		memset(opts + opts_nr, 0, sizeof(*opts));
 
-		o = &opts[onb++];
+		o = &opts[opts_nr++];
 		help = findspace(sb.buf);
 		if (!help || sb.buf == help) {
 			o->type = OPTION_GROUP;
@@ -494,20 +499,22 @@ static int cmd_parseopt(int argc, const char **argv, const char *prefix)
 		o->callback = &parseopt_dump;
 
 		/* name(s) */
-		s = strpbrk(sb.buf, flag_chars);
+		s = strpbrk(sb.buf, "*=?!");
 		if (!s)
 			s = help;
 
 		if (s == sb.buf)
 			die(_("missing opt-spec before option flags"));
 
-		if (s - sb.buf == 1) /* short option only */
+		if (s - sb.buf == 1) { /* short option only */
 			o->short_name = *sb.buf;
-		else if (sb.buf[1] != ',') /* long option only */
-			o->long_name = xmemdupz(sb.buf, s - sb.buf);
-		else {
+		} else if (sb.buf[1] != ',') { /* long option only */
+			o->long_name = strvec_pushf(&longnames, "%.*s",
+						    (int)(s - sb.buf), sb.buf);
+		} else {
 			o->short_name = *sb.buf;
-			o->long_name = xmemdupz(sb.buf + 2, s - sb.buf - 2);
+			o->long_name = strvec_pushf(&longnames, "%.*s",
+						    (int)(s - sb.buf - 2), sb.buf + 2);
 		}
 
 		/* flags */
@@ -537,9 +544,9 @@ static int cmd_parseopt(int argc, const char **argv, const char *prefix)
 	strbuf_release(&sb);
 
 	/* put an OPT_END() */
-	ALLOC_GROW(opts, onb + 1, osz);
-	memset(opts + onb, 0, sizeof(opts[onb]));
-	argc = parse_options(argc, argv, prefix, opts, usage,
+	ALLOC_GROW(opts, opts_nr + 1, opts_alloc);
+	memset(opts + opts_nr, 0, sizeof(*opts));
+	argc = parse_options(argc, argv, prefix, opts, usage.v,
 			(keep_dashdash ? PARSE_OPT_KEEP_DASHDASH : 0) |
 			(stop_at_non_option ? PARSE_OPT_STOP_AT_NON_OPTION : 0) |
 			PARSE_OPT_SHELL_EVAL);
@@ -547,7 +554,16 @@ static int cmd_parseopt(int argc, const char **argv, const char *prefix)
 	strbuf_addstr(&parsed, " --");
 	sq_quote_argv(&parsed, argv);
 	puts(parsed.buf);
+
 	strbuf_release(&parsed);
+	strbuf_release(&sb);
+	strvec_clear(&longnames);
+	strvec_clear(&usage);
+	for (size_t i = 0; i < opts_nr; i++) {
+		free((char *) opts[i].help);
+		free((char *) opts[i].argh);
+	}
+	free(opts);
 	return 0;
 }
 
@@ -678,7 +694,10 @@ static void print_path(const char *path, const char *prefix, enum format_type fo
 	free(cwd);
 }
 
-int cmd_rev_parse(int argc, const char **argv, const char *prefix)
+int cmd_rev_parse(int argc,
+		  const char **argv,
+		  const char *prefix,
+		  struct repository *repo UNUSED)
 {
 	int i, as_is = 0, verify = 0, quiet = 0, revs_count = 0, type = 0;
 	const struct git_hash_algo *output_algo = NULL;
@@ -693,6 +712,8 @@ int cmd_rev_parse(int argc, const char **argv, const char *prefix)
 	struct strbuf buf = STRBUF_INIT;
 	int seen_end_of_options = 0;
 	enum format_type format = FORMAT_DEFAULT;
+
+	show_usage_if_asked(argc, argv, builtin_rev_parse_usage);
 
 	if (argc > 1 && !strcmp("--parseopt", argv[1]))
 		return cmd_parseopt(argc - 1, argv + 1, prefix);
@@ -888,7 +909,8 @@ int cmd_rev_parse(int argc, const char **argv, const char *prefix)
 			}
 			if (opt_with_value(arg, "--abbrev-ref", &arg)) {
 				abbrev_ref = 1;
-				abbrev_ref_strict = warn_ambiguous_refs;
+				abbrev_ref_strict =
+					repo_settings_get_warn_ambiguous_refs(the_repository);
 				if (arg) {
 					if (!strcmp(arg, "strict"))
 						abbrev_ref_strict = 1;
@@ -956,7 +978,7 @@ int cmd_rev_parse(int argc, const char **argv, const char *prefix)
 				continue;
 			}
 			if (!strcmp(arg, "--show-toplevel")) {
-				const char *work_tree = get_git_work_tree();
+				const char *work_tree = repo_get_work_tree(the_repository);
 				if (work_tree)
 					print_path(work_tree, prefix, format, DEFAULT_UNMODIFIED);
 				else
@@ -981,7 +1003,7 @@ int cmd_rev_parse(int argc, const char **argv, const char *prefix)
 				const char *pfx = prefix;
 				if (!is_inside_work_tree()) {
 					const char *work_tree =
-						get_git_work_tree();
+						repo_get_work_tree(the_repository);
 					if (work_tree)
 						printf("%s\n", work_tree);
 					continue;
@@ -1032,7 +1054,7 @@ int cmd_rev_parse(int argc, const char **argv, const char *prefix)
 				continue;
 			}
 			if (!strcmp(arg, "--git-common-dir")) {
-				print_path(get_git_common_dir(), prefix, format, DEFAULT_RELATIVE_IF_SHARED);
+				print_path(repo_get_common_dir(the_repository), prefix, format, DEFAULT_RELATIVE_IF_SHARED);
 				continue;
 			}
 			if (!strcmp(arg, "--is-inside-git-dir")) {
@@ -1121,6 +1143,7 @@ int cmd_rev_parse(int argc, const char **argv, const char *prefix)
 		}
 		if (!get_oid_with_context(the_repository, name,
 					  flags, &oid, &unused)) {
+			object_context_release(&unused);
 			if (output_algo)
 				repo_oid_to_algop(the_repository, &oid,
 						  output_algo, &oid);
@@ -1130,6 +1153,7 @@ int cmd_rev_parse(int argc, const char **argv, const char *prefix)
 				show_rev(type, &oid, name);
 			continue;
 		}
+		object_context_release(&unused);
 		if (verify)
 			die_no_single_rev(quiet);
 		if (has_dashdash)

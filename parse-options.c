@@ -60,12 +60,12 @@ static enum parse_opt_result get_arg(struct parse_opt_ctx_t *p,
 	return 0;
 }
 
-static void fix_filename(const char *prefix, char **file)
+static char *fix_filename(const char *prefix, const char *file)
 {
 	if (!file || !*file)
-		; /* leave as NULL */
+		return NULL;
 	else
-		*file = prefix_filename_except_for_dash(prefix, *file);
+		return prefix_filename_except_for_dash(prefix, file);
 }
 
 static enum parse_opt_result do_get_value(struct parse_opt_ctx_t *p,
@@ -129,18 +129,24 @@ static enum parse_opt_result do_get_value(struct parse_opt_ctx_t *p,
 		return 0;
 
 	case OPTION_FILENAME:
+	{
+		const char *value;
+
+		FREE_AND_NULL(*(char **)opt->value);
+
 		err = 0;
+
 		if (unset)
-			*(const char **)opt->value = NULL;
+			value = NULL;
 		else if (opt->flags & PARSE_OPT_OPTARG && !p->opt)
-			*(const char **)opt->value = (const char *)opt->defval;
+			value = (const char *) opt->defval;
 		else
-			err = get_arg(p, opt, flags, (const char **)opt->value);
+			err = get_arg(p, opt, flags, &value);
 
 		if (!err)
-			fix_filename(p->prefix, (char **)opt->value);
+			*(char **)opt->value = fix_filename(p->prefix, value);
 		return err;
-
+	}
 	case OPTION_CALLBACK:
 	{
 		const char *p_arg = NULL;
@@ -1070,11 +1076,48 @@ static int usage_argh(const struct option *opts, FILE *outfile)
 		!opts->argh || !!strpbrk(opts->argh, "()<>[]|");
 	if (opts->flags & PARSE_OPT_OPTARG)
 		if (opts->long_name)
-			s = literal ? "[=%s]" : "[=<%s>]";
+			/*
+			 * TRANSLATORS: The "<%s>" part of this string
+			 * stands for an optional value given to a command
+			 * line option in the long form, and "<>" is there
+			 * as a convention to signal that it is a
+			 * placeholder (i.e. the user should substitute it
+			 * with the real value).  If your language uses a
+			 * different convention, you can change "<%s>" part
+			 * to match yours, e.g. it might use "|%s|" instead,
+			 * or if the alphabet is different enough it may use
+			 * "%s" without any placeholder signal.  Most
+			 * translations leave this message as is.
+			 */
+			s = literal ? "[=%s]" : _("[=<%s>]");
 		else
-			s = literal ? "[%s]" : "[<%s>]";
+			/*
+			 * TRANSLATORS: The "<%s>" part of this string
+			 * stands for an optional value given to a command
+			 * line option in the short form, and "<>" is there
+			 * as a convention to signal that it is a
+			 * placeholder (i.e. the user should substitute it
+			 * with the real value).  If your language uses a
+			 * different convention, you can change "<%s>" part
+			 * to match yours, e.g. it might use "|%s|" instead,
+			 * or if the alphabet is different enough it may use
+			 * "%s" without any placeholder signal.  Most
+			 * translations leave this message as is.
+			 */
+			s = literal ? "[%s]" : _("[<%s>]");
 	else
-		s = literal ? " %s" : " <%s>";
+		/*
+		 * TRANSLATORS: The "<%s>" part of this string stands for a
+		 * value given to a command line option, and "<>" is there
+		 * as a convention to signal that it is a placeholder
+		 * (i.e. the user should substitute it with the real value).
+		 * If your language uses a different convention, you can
+		 * change "<%s>" part to match yours, e.g. it might use
+		 * "|%s|" instead, or if the alphabet is different enough it
+		 * may use "%s" without any placeholder signal.  Most
+		 * translations leave this message as is.
+		 */
+		s = literal ? " %s" : _(" <%s>");
 	return utf8_fprintf(outfile, s, opts->argh ? _(opts->argh) : _("..."));
 }
 
@@ -1274,6 +1317,16 @@ void NORETURN usage_with_options(const char * const *usagestr,
 {
 	usage_with_options_internal(NULL, usagestr, opts, 0, 1);
 	exit(129);
+}
+
+void show_usage_with_options_if_asked(int ac, const char **av,
+				      const char * const *usagestr,
+				      const struct option *opts)
+{
+	if (ac == 2 && !strcmp(av[1], "-h")) {
+		usage_with_options_internal(NULL, usagestr, opts, 0, 0);
+		exit(129);
+	}
 }
 
 void NORETURN usage_msg_opt(const char *msg,

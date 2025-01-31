@@ -196,6 +196,11 @@ int is_executable(const char *name);
 int exists_in_PATH(const char *command);
 
 /**
+ * Return the path that is used to execute Unix shell command-lines.
+ */
+char *git_shell_path(void);
+
+/**
  * Start a sub-process. Takes a pointer to a `struct child_process`
  * that specifies the details and returns pipe FDs (if requested).
  * See below for details.
@@ -530,7 +535,7 @@ enum start_bg_result {
 	/* timeout expired waiting for child to become "ready" */
 	SBGR_TIMEOUT,
 
-	/* child process exited or was signalled before becomming "ready" */
+	/* child process exited or was signalled before becoming "ready" */
 	SBGR_DIED,
 };
 

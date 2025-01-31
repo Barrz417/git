@@ -44,6 +44,16 @@ struct strbuf;
  #define GIT_GNUC_PREREQ(maj, min) 0
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#  define PRAGMA(pragma)           _Pragma(#pragma)
+#  define DISABLE_WARNING(warning) PRAGMA(GCC diagnostic ignored #warning)
+#else
+#  define DISABLE_WARNING(warning)
+#endif
+
+#ifdef DISABLE_SIGN_COMPARE_WARNINGS
+DISABLE_WARNING(-Wsign-compare)
+#endif
 
 #ifndef FLEX_ARRAY
 /*
@@ -195,6 +205,19 @@ struct strbuf;
 #define _NETBSD_SOURCE 1
 #define _SGI_SOURCE 1
 
+/*
+ * UNUSED marks a function parameter that is always unused.  It also
+ * can be used to annotate a function, a variable, or a type that is
+ * always unused.
+ *
+ * A callback interface may dictate that a function accepts a
+ * parameter at that position, but the implementation of the function
+ * may not need to use the parameter.  In such a case, mark the parameter
+ * with UNUSED.
+ *
+ * When a parameter may be used or unused, depending on conditional
+ * compilation, consider using MAYBE_UNUSED instead.
+ */
 #if GIT_GNUC_PREREQ(4, 5)
 #define UNUSED __attribute__((unused)) \
 	__attribute__((deprecated ("parameter declared as UNUSED")))
@@ -506,6 +529,14 @@ static inline int git_offset_1st_component(const char *path)
 #define offset_1st_component git_offset_1st_component
 #endif
 
+#ifndef fspathcmp
+#define fspathcmp git_fspathcmp
+#endif
+
+#ifndef fspathncmp
+#define fspathncmp git_fspathncmp
+#endif
+
 #ifndef is_valid_path
 #define is_valid_path(path) 1
 #endif
@@ -641,6 +672,17 @@ static inline int git_has_dir_sep(const char *path)
 #define RESULT_MUST_BE_USED
 #endif
 
+/*
+ * MAYBE_UNUSED marks a function parameter that may be unused, but
+ * whose use is not an error.  It also can be used to annotate a
+ * function, a variable, or a type that may be unused.
+ *
+ * Depending on a configuration, all uses of such a thing may become
+ * #ifdef'ed away.  Marking it with UNUSED would give a warning in a
+ * compilation where it is indeed used, and not marking it at all
+ * would give a warning in a compilation where it is unused.  In such
+ * a case, MAYBE_UNUSED is the appropriate annotation to use.
+ */
 #define MAYBE_UNUSED __attribute__((__unused__))
 
 #include "compat/bswap.h"
@@ -658,6 +700,8 @@ int error(const char *err, ...) __attribute__((format (printf, 1, 2)));
 int error_errno(const char *err, ...) __attribute__((format (printf, 1, 2)));
 void warning(const char *err, ...) __attribute__((format (printf, 1, 2)));
 void warning_errno(const char *err, ...) __attribute__((format (printf, 1, 2)));
+
+void show_usage_if_asked(int ac, const char **av, const char *err);
 
 #ifndef NO_OPENSSL
 #ifdef APPLE_COMMON_CRYPTO
@@ -1494,26 +1538,6 @@ int cmd_main(int, const char **);
  */
 int common_exit(const char *file, int line, int code);
 #define exit(code) exit(common_exit(__FILE__, __LINE__, (code)))
-
-/*
- * You can mark a stack variable with UNLEAK(var) to avoid it being
- * reported as a leak by tools like LSAN or valgrind. The argument
- * should generally be the variable itself (not its address and not what
- * it points to). It's safe to use this on pointers which may already
- * have been freed, or on pointers which may still be in use.
- *
- * Use this _only_ for a variable that leaks by going out of scope at
- * program exit (so only from cmd_* functions or their direct helpers).
- * Normal functions, especially those which may be called multiple
- * times, should actually free their memory. This is only meant as
- * an annotation, and does nothing in non-leak-checking builds.
- */
-#ifdef SUPPRESS_ANNOTATED_LEAKS
-void unleak_memory(const void *ptr, size_t len);
-#define UNLEAK(var) unleak_memory(&(var), sizeof(var))
-#else
-#define UNLEAK(var) do {} while (0)
-#endif
 
 #define z_const
 #include <zlib.h>

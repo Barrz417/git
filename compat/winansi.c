@@ -4,6 +4,8 @@
 
 #undef NOGDI
 
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "../git-compat-util.h"
 #include <wingdi.h>
 #include <winreg.h>
@@ -340,7 +342,7 @@ enum {
 	TEXT = 0, ESCAPE = 033, BRACKET = '['
 };
 
-static DWORD WINAPI console_thread(LPVOID unused)
+static DWORD WINAPI console_thread(LPVOID data UNUSED)
 {
 	unsigned char buffer[BUFFER_SIZE];
 	DWORD bytes;

@@ -4,6 +4,9 @@
  * Copyright (C) Linus Torvalds, 2005
  */
 
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
 #include "bulk-checkin.h"
 #include "config.h"
@@ -22,7 +25,6 @@
 #include "pathspec.h"
 #include "dir.h"
 #include "read-cache.h"
-#include "repository.h"
 #include "setup.h"
 #include "sparse-index.h"
 #include "split-index.h"
@@ -917,7 +919,10 @@ static enum parse_opt_result reupdate_callback(
 	return 0;
 }
 
-int cmd_update_index(int argc, const char **argv, const char *prefix)
+int cmd_update_index(int argc,
+		     const char **argv,
+		     const char *prefix,
+		     struct repository *repo UNUSED)
 {
 	int newfd, entries, has_errors = 0, nul_term_line = 0;
 	enum uc_mode untracked_cache = UC_UNSPECIFIED;
@@ -1040,8 +1045,8 @@ int cmd_update_index(int argc, const char **argv, const char *prefix)
 		OPT_END()
 	};
 
-	if (argc == 2 && !strcmp(argv[1], "-h"))
-		usage_with_options(update_index_usage, options);
+	show_usage_with_options_if_asked(argc, argv,
+					 update_index_usage, options);
 
 	git_config(git_default_config, NULL);
 
@@ -1156,7 +1161,7 @@ int cmd_update_index(int argc, const char **argv, const char *prefix)
 	end_odb_transaction();
 
 	if (split_index > 0) {
-		if (git_config_get_split_index() == 0)
+		if (repo_config_get_split_index(the_repository) == 0)
 			warning(_("core.splitIndex is set to false; "
 				  "remove or change it, if you really want to "
 				  "enable split index"));
@@ -1165,7 +1170,7 @@ int cmd_update_index(int argc, const char **argv, const char *prefix)
 		else
 			add_split_index(the_repository->index);
 	} else if (!split_index) {
-		if (git_config_get_split_index() == 1)
+		if (repo_config_get_split_index(the_repository) == 1)
 			warning(_("core.splitIndex is set to true; "
 				  "remove or change it, if you really want to "
 				  "disable split index"));
@@ -1194,7 +1199,7 @@ int cmd_update_index(int argc, const char **argv, const char *prefix)
 				  "remove or change it, if you really want to "
 				  "enable the untracked cache"));
 		add_untracked_cache(the_repository->index);
-		report(_("Untracked cache enabled for '%s'"), get_git_work_tree());
+		report(_("Untracked cache enabled for '%s'"), repo_get_work_tree(the_repository));
 		break;
 	default:
 		BUG("bad untracked_cache value: %d", untracked_cache);
@@ -1239,7 +1244,7 @@ int cmd_update_index(int argc, const char **argv, const char *prefix)
 		if (newfd < 0) {
 			if (refresh_args.flags & REFRESH_QUIET)
 				exit(128);
-			unable_to_lock_die(get_index_file(), lock_error);
+			unable_to_lock_die(repo_get_index_file(the_repository), lock_error);
 		}
 		if (write_locked_index(the_repository->index, &lock_file, COMMIT_LOCK))
 			die("Unable to write new index file");

@@ -1,7 +1,8 @@
+#define USE_THE_REPOSITORY_VARIABLE
+
 #include "builtin.h"
 #include "config.h"
 #include "gettext.h"
-#include "repository.h"
 #include "revision.h"
 #include "reachable.h"
 #include "wildmatch.h"
@@ -234,7 +235,8 @@ static int expire_total_callback(const struct option *opt,
 	return 0;
 }
 
-static int cmd_reflog_show(int argc, const char **argv, const char *prefix)
+static int cmd_reflog_show(int argc, const char **argv, const char *prefix,
+			   struct repository *repo UNUSED)
 {
 	struct option options[] = {
 		OPT_END()
@@ -244,7 +246,7 @@ static int cmd_reflog_show(int argc, const char **argv, const char *prefix)
 		      PARSE_OPT_KEEP_DASHDASH | PARSE_OPT_KEEP_ARGV0 |
 		      PARSE_OPT_KEEP_UNKNOWN_OPT);
 
-	return cmd_log_reflog(argc, argv, prefix);
+	return cmd_log_reflog(argc, argv, prefix, the_repository);
 }
 
 static int show_reflog(const char *refname, void *cb_data UNUSED)
@@ -253,7 +255,8 @@ static int show_reflog(const char *refname, void *cb_data UNUSED)
 	return 0;
 }
 
-static int cmd_reflog_list(int argc, const char **argv, const char *prefix)
+static int cmd_reflog_list(int argc, const char **argv, const char *prefix,
+			   struct repository *repo UNUSED)
 {
 	struct option options[] = {
 		OPT_END()
@@ -270,7 +273,8 @@ static int cmd_reflog_list(int argc, const char **argv, const char *prefix)
 	return refs_for_each_reflog(ref_store, show_reflog, NULL);
 }
 
-static int cmd_reflog_expire(int argc, const char **argv, const char *prefix)
+static int cmd_reflog_expire(int argc, const char **argv, const char *prefix,
+			     struct repository *repo UNUSED)
 {
 	struct cmd_reflog_expire_cb cmd = { 0 };
 	timestamp_t now = time(NULL);
@@ -394,7 +398,8 @@ static int cmd_reflog_expire(int argc, const char **argv, const char *prefix)
 	return status;
 }
 
-static int cmd_reflog_delete(int argc, const char **argv, const char *prefix)
+static int cmd_reflog_delete(int argc, const char **argv, const char *prefix,
+			     struct repository *repo UNUSED)
 {
 	int i, status = 0;
 	unsigned int flags = 0;
@@ -424,7 +429,8 @@ static int cmd_reflog_delete(int argc, const char **argv, const char *prefix)
 	return status;
 }
 
-static int cmd_reflog_exists(int argc, const char **argv, const char *prefix)
+static int cmd_reflog_exists(int argc, const char **argv, const char *prefix,
+			     struct repository *repo UNUSED)
 {
 	struct option options[] = {
 		OPT_END()
@@ -447,7 +453,10 @@ static int cmd_reflog_exists(int argc, const char **argv, const char *prefix)
  * main "reflog"
  */
 
-int cmd_reflog(int argc, const char **argv, const char *prefix)
+int cmd_reflog(int argc,
+	       const char **argv,
+	       const char *prefix,
+	       struct repository *repository)
 {
 	parse_opt_subcommand_fn *fn = NULL;
 	struct option options[] = {
@@ -464,7 +473,7 @@ int cmd_reflog(int argc, const char **argv, const char *prefix)
 			     PARSE_OPT_KEEP_DASHDASH | PARSE_OPT_KEEP_ARGV0 |
 			     PARSE_OPT_KEEP_UNKNOWN_OPT);
 	if (fn)
-		return fn(argc - 1, argv + 1, prefix);
+		return fn(argc - 1, argv + 1, prefix, repository);
 	else
-		return cmd_log_reflog(argc, argv, prefix);
+		return cmd_log_reflog(argc, argv, prefix, repository);
 }

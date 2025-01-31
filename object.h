@@ -1,12 +1,13 @@
 #ifndef OBJECT_H
 #define OBJECT_H
 
-#include "hash-ll.h"
+#include "hash.h"
 
 struct buffer_slab;
 struct repository;
 
 struct parsed_object_pool {
+	struct repository *repo;
 	struct object **obj_hash;
 	int nr_objs, obj_hash_size;
 
@@ -31,8 +32,9 @@ struct parsed_object_pool {
 	struct buffer_slab *buffer_slab;
 };
 
-struct parsed_object_pool *parsed_object_pool_new(void);
+struct parsed_object_pool *parsed_object_pool_new(struct repository *repo);
 void parsed_object_pool_clear(struct parsed_object_pool *o);
+void parsed_object_pool_reset_commit_grafts(struct parsed_object_pool *o);
 
 struct object_list {
 	struct object *item;
@@ -62,7 +64,7 @@ void object_array_init(struct object_array *array);
 
 /*
  * object flag allocation:
- * revision.h:               0---------10         15             23------27
+ * revision.h:               0---------10         15               23------27
  * fetch-pack.c:             01    67
  * negotiator/default.c:       2--5
  * walker.c:                 0-2
@@ -75,13 +77,14 @@ void object_array_init(struct object_array *array);
  * commit-reach.c:                                  16-----19
  * sha1-name.c:                                              20
  * list-objects-filter.c:                                      21
+ * bloom.c:                                                    2122
  * builtin/fsck.c:           0--3
  * builtin/gc.c:             0
  * builtin/index-pack.c:                                     2021
  * reflog.c:                           10--12
  * builtin/show-branch.c:    0-------------------------------------------26
  * builtin/unpack-objects.c:                                 2021
- * pack-bitmap.h:                                                22
+ * pack-bitmap.h:                                              2122
  */
 #define FLAG_BITS  28
 

@@ -4,6 +4,9 @@
  * Copyright (C) Linus Torvalds, 2005
  */
 
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
 #include "config.h"
 #include "convert.h"
@@ -102,7 +105,7 @@ static int cat_one_file(int opt, const char *exp_type, const char *obj_name,
 	enum object_type type;
 	char *buf;
 	unsigned long size;
-	struct object_context obj_context;
+	struct object_context obj_context = {0};
 	struct object_info oi = OBJECT_INFO_INIT;
 	struct strbuf sb = STRBUF_INIT;
 	unsigned flags = OBJECT_INFO_LOOKUP_REPLACE;
@@ -163,7 +166,8 @@ static int cat_one_file(int opt, const char *exp_type, const char *obj_name,
 		goto cleanup;
 
 	case 'e':
-		return !repo_has_object_file(the_repository, &oid);
+		ret = !repo_has_object_file(the_repository, &oid);
+		goto cleanup;
 
 	case 'w':
 
@@ -190,7 +194,7 @@ static int cat_one_file(int opt, const char *exp_type, const char *obj_name,
 			const char *ls_args[3] = { NULL };
 			ls_args[0] =  "ls-tree";
 			ls_args[1] =  obj_name;
-			ret = cmd_ls_tree(2, ls_args, NULL);
+			ret = cmd_ls_tree(2, ls_args, NULL, the_repository);
 			goto cleanup;
 		}
 
@@ -268,7 +272,7 @@ static int cat_one_file(int opt, const char *exp_type, const char *obj_name,
 	ret = 0;
 cleanup:
 	free(buf);
-	free(obj_context.path);
+	object_context_release(&obj_context);
 	return ret;
 }
 
@@ -520,7 +524,7 @@ static void batch_one_object(const char *obj_name,
 			     struct batch_options *opt,
 			     struct expand_data *data)
 {
-	struct object_context ctx;
+	struct object_context ctx = {0};
 	int flags =
 		GET_OID_HASH_ANY |
 		(opt->follow_symlinks ? GET_OID_FOLLOW_SYMLINKS : 0);
@@ -557,7 +561,8 @@ static void batch_one_object(const char *obj_name,
 			break;
 		}
 		fflush(stdout);
-		return;
+
+		goto out;
 	}
 
 	if (ctx.mode == 0) {
@@ -565,10 +570,13 @@ static void batch_one_object(const char *obj_name,
 		       (uintmax_t)ctx.symlink_path.len,
 		       opt->output_delim, ctx.symlink_path.buf, opt->output_delim);
 		fflush(stdout);
-		return;
+		goto out;
 	}
 
 	batch_object_write(obj_name, scratch, opt, data, NULL, 0);
+
+out:
+	object_context_release(&ctx);
 }
 
 struct object_cb_data {
@@ -822,15 +830,16 @@ static int batch_objects(struct batch_options *opt)
 			cb.seen = &seen;
 
 			for_each_loose_object(batch_unordered_loose, &cb, 0);
-			for_each_packed_object(batch_unordered_packed, &cb,
-					       FOR_EACH_OBJECT_PACK_ORDER);
+			for_each_packed_object(the_repository, batch_unordered_packed,
+					       &cb, FOR_EACH_OBJECT_PACK_ORDER);
 
 			oidset_clear(&seen);
 		} else {
 			struct oid_array sa = OID_ARRAY_INIT;
 
 			for_each_loose_object(collect_loose_object, &sa, 0);
-			for_each_packed_object(collect_packed_object, &sa, 0);
+			for_each_packed_object(the_repository, collect_packed_object,
+					       &sa, 0);
 
 			oid_array_for_each_unique(&sa, batch_object_cb, &cb);
 
@@ -918,7 +927,10 @@ static int batch_option_callback(const struct option *opt,
 	return 0;
 }
 
-int cmd_cat_file(int argc, const char **argv, const char *prefix)
+int cmd_cat_file(int argc,
+		 const char **argv,
+		 const char *prefix,
+		 struct repository *repo UNUSED)
 {
 	int opt = 0;
 	int opt_cw = 0;
@@ -1041,6 +1053,9 @@ int cmd_cat_file(int argc, const char **argv, const char *prefix)
 	/* Batch defaults */
 	if (batch.buffer_output < 0)
 		batch.buffer_output = batch.all_objects;
+
+	prepare_repo_settings(the_repository);
+	the_repository->settings.command_requires_full_index = 0;
 
 	/* Return early if we're in batch mode? */
 	if (batch.enabled) {

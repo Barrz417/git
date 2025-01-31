@@ -1,6 +1,7 @@
 #!/bin/sh
 
 test_description='test git rev-parse --parseopt'
+
 . ./test-lib.sh
 
 check_invalid_long_option () {

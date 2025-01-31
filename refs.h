@@ -2,26 +2,22 @@
 #define REFS_H
 
 #include "commit.h"
+#include "repository.h"
+#include "repo-settings.h"
 
+struct fsck_options;
 struct object_id;
 struct ref_store;
-struct repository;
 struct strbuf;
 struct string_list;
 struct string_list_item;
 struct worktree;
 
-enum ref_storage_format {
-	REF_STORAGE_FORMAT_UNKNOWN,
-	REF_STORAGE_FORMAT_FILES,
-	REF_STORAGE_FORMAT_REFTABLE,
-};
-
 enum ref_storage_format ref_storage_format_by_name(const char *name);
 const char *ref_storage_format_to_name(enum ref_storage_format ref_storage_format);
 
 /*
- * Resolve a reference, recursively following symbolic refererences.
+ * Resolve a reference, recursively following symbolic references.
  *
  * Return the name of the non-symbolic reference that ultimately pointed
  * at the resolved object name.  The return value, if not NULL, is a
@@ -87,6 +83,17 @@ int refs_read_ref_full(struct ref_store *refs, const char *refname,
 
 int refs_read_ref(struct ref_store *refs, const char *refname, struct object_id *oid);
 
+#define NOT_A_SYMREF -2
+
+/*
+ * Read the symbolic ref named "refname" and write its immediate referent into
+ * the provided buffer. Referent is left empty if "refname" is not a symbolic
+ * ref. It does not resolve the symbolic reference recursively in case the
+ * target is also a symbolic ref.
+ *
+ * Returns 0 on success, -2 if the "refname" is not a symbolic ref,
+ * -1 otherwise.
+ */
 int refs_read_symbolic_ref(struct ref_store *ref_store, const char *refname,
 			   struct strbuf *referent);
 
@@ -105,18 +112,22 @@ int refs_read_symbolic_ref(struct ref_store *ref_store, const char *refname,
  * both "foo" and with "foo/bar/baz" but not with "foo/bar" or
  * "foo/barbados".
  *
+ * If `initial_transaction` is truish, then all collision checks with
+ * preexisting refs are skipped.
+ *
  * extras and skip must be sorted.
  */
-
 int refs_verify_refname_available(struct ref_store *refs,
 				  const char *refname,
 				  const struct string_list *extras,
 				  const struct string_list *skip,
+				  unsigned int initial_transaction,
 				  struct strbuf *err);
 
 int refs_ref_exists(struct ref_store *refs, const char *refname);
 
-int should_autocreate_reflog(const char *refname);
+int should_autocreate_reflog(enum log_refs_config log_all_ref_updates,
+			     const char *refname);
 
 int is_branch(const char *refname);
 
@@ -184,6 +195,35 @@ int repo_dwim_log(struct repository *r, const char *str, int len, struct object_
 char *repo_default_branch_name(struct repository *r, int quiet);
 
 /*
+ * Copy "name" to "sb", expanding any special @-marks as handled by
+ * repo_interpret_branch_name(). The result is a non-qualified branch name
+ * (so "foo" or "origin/master" instead of "refs/heads/foo" or
+ * "refs/remotes/origin/master").
+ *
+ * Note that the resulting name may not be a syntactically valid refname.
+ *
+ * If "allowed" is non-zero, restrict the set of allowed expansions. See
+ * repo_interpret_branch_name() for details.
+ */
+void copy_branchname(struct strbuf *sb, const char *name,
+		       unsigned allowed);
+
+/*
+ * Like copy_branchname() above, but confirm that the result is
+ * syntactically valid to be used as a local branch name in refs/heads/.
+ *
+ * The return value is "0" if the result is valid, and "-1" otherwise.
+ */
+int check_branch_ref(struct strbuf *sb, const char *name);
+
+/*
+ * Similar for a tag name in refs/tags/.
+ *
+ * The return value is "0" if the result is valid, and "-1" otherwise.
+ */
+int check_tag_ref(struct strbuf *sb, const char *name);
+
+/*
  * A ref_transaction represents a collection of reference updates that
  * should succeed or fail together.
  *
@@ -217,11 +257,9 @@ char *repo_default_branch_name(struct repository *r, int quiet);
  *
  *   Or
  *
- *   - Call `initial_ref_transaction_commit()` if the ref database is
- *     known to be empty and have no other writers (e.g. during
- *     clone). This is likely to be much faster than
- *     `ref_transaction_commit()`. `ref_transaction_prepare()` should
- *     *not* be called before `initial_ref_transaction_commit()`.
+ *   - Call `ref_transaction_begin()` with REF_TRANSACTION_FLAG_INITIAL if the
+ *     ref database is known to be empty and have no other writers (e.g. during
+ *     clone). This is likely to be much faster than without the flag.
  *
  * - Then finally, call `ref_transaction_free()` to free the
  *   `ref_transaction` data structure.
@@ -237,7 +275,7 @@ char *repo_default_branch_name(struct repository *r, int quiet);
  *         struct strbuf err = STRBUF_INIT;
  *         int ret = 0;
  *
- *         transaction = ref_store_transaction_begin(refs, &err);
+ *         transaction = ref_store_transaction_begin(refs, 0, &err);
  *         if (!transaction ||
  *             ref_transaction_update(...) ||
  *             ref_transaction_create(...) ||
@@ -304,7 +342,7 @@ struct ref_transaction;
  * arguments is only guaranteed to be valid for the duration of a
  * single callback invocation.
  */
-typedef int each_ref_fn(const char *refname,
+typedef int each_ref_fn(const char *refname, const char *referent,
 			const struct object_id *oid, int flags, void *cb_data);
 
 /*
@@ -493,7 +531,7 @@ int refs_delete_reflog(struct ref_store *refs, const char *refname);
  * from UTC.  Its absolute value is formed by multiplying the hour
  * part by 100 and adding the minute part.  For example, 1 hour ahead
  * of UTC, CET == "+0100", is represented as positive one hundred (not
- * postiive sixty).
+ * positive sixty).
  *
  * The msg parameter is a single complete line; a reflog message given
  * to refs_delete_ref, refs_update_ref, etc. is returned to the
@@ -548,6 +586,14 @@ int refs_for_each_reflog(struct ref_store *refs, each_reflog_fn fn, void *cb_dat
 int check_refname_format(const char *refname, int flags);
 
 /*
+ * Check the reference database for consistency. Return 0 if refs and
+ * reflogs are consistent, and non-zero otherwise. The errors will be
+ * written to stderr.
+ */
+int refs_fsck(struct ref_store *refs, struct fsck_options *o,
+	      struct worktree *wt);
+
+/*
  * Apply the rules from check_refname_format, but mutate the result until it
  * is acceptable, and place the result in "out".
  */
@@ -569,10 +615,29 @@ int refs_copy_existing_ref(struct ref_store *refs, const char *oldref,
 int refs_update_symref(struct ref_store *refs, const char *refname,
 		       const char *target, const char *logmsg);
 
+int refs_update_symref_extended(struct ref_store *refs, const char *refname,
+		       const char *target, const char *logmsg,
+		       struct strbuf *referent, int create_only);
+
 enum action_on_err {
 	UPDATE_REFS_MSG_ON_ERR,
 	UPDATE_REFS_DIE_ON_ERR,
 	UPDATE_REFS_QUIET_ON_ERR
+};
+
+enum ref_transaction_flag {
+	/*
+	 * The ref transaction is part of the initial creation of the ref store
+	 * and can thus assume that the ref store is completely empty. This
+	 * allows the backend to perform the transaction more efficiently by
+	 * skipping certain checks.
+	 *
+	 * It is a bug to set this flag when there might be other processes
+	 * accessing the repository or if there are existing references that
+	 * might conflict with the ones being created. All old_oid values must
+	 * either be absent or null_oid.
+	 */
+	REF_TRANSACTION_FLAG_INITIAL = (1 << 0),
 };
 
 /*
@@ -580,6 +645,7 @@ enum action_on_err {
  * be freed by calling ref_transaction_free().
  */
 struct ref_transaction *ref_store_transaction_begin(struct ref_store *refs,
+						    unsigned int flags,
 						    struct strbuf *err);
 
 /*
@@ -706,6 +772,20 @@ int ref_transaction_update(struct ref_transaction *transaction,
 			   struct strbuf *err);
 
 /*
+ * Similar to`ref_transaction_update`, but this function is only for adding
+ * a reflog update. Supports providing custom committer information. The index
+ * field can be utiltized to order updates as desired. When not used, the
+ * updates default to being ordered by refname.
+ */
+int ref_transaction_update_reflog(struct ref_transaction *transaction,
+				  const char *refname,
+				  const struct object_id *new_oid,
+				  const struct object_id *old_oid,
+				  const char *committer_info, unsigned int flags,
+				  const char *msg, unsigned int index,
+				  struct strbuf *err);
+
+/*
  * Add a reference creation to transaction. new_oid is the value that
  * the reference should have after the update; it must not be
  * null_oid. It is verified that the reference does not exist
@@ -754,8 +834,10 @@ int ref_transaction_verify(struct ref_transaction *transaction,
 
 /* Naming conflict (for example, the ref names A and A/B conflict). */
 #define TRANSACTION_NAME_CONFLICT -1
+/* When only creation was requested, but the ref already exists. */
+#define TRANSACTION_CREATE_EXISTS -2
 /* All other errors. */
-#define TRANSACTION_GENERIC_ERROR -2
+#define TRANSACTION_GENERIC_ERROR -3
 
 /*
  * Perform the preparatory stages of committing `transaction`. Acquire
@@ -792,20 +874,6 @@ int ref_transaction_commit(struct ref_transaction *transaction,
  */
 int ref_transaction_abort(struct ref_transaction *transaction,
 			  struct strbuf *err);
-
-/*
- * Like ref_transaction_commit(), but optimized for creating
- * references when originally initializing a repository (e.g., by "git
- * clone"). It writes the new references directly to packed-refs
- * without locking the individual references.
- *
- * It is a bug to call this function when there might be other
- * processes accessing the repository or if there are existing
- * references that might conflict with the ones being created. All
- * old_oid values must either be absent or null_oid.
- */
-int initial_ref_transaction_commit(struct ref_transaction *transaction,
-				   struct strbuf *err);
 
 /*
  * Execute the given callback function for each of the reference updates which
@@ -856,6 +924,15 @@ int ref_is_hidden(const char *, const char *, const struct strvec *);
  * hidden references use the token '!' or '^'.
  */
 const char **hidden_refs_to_excludes(const struct strvec *hide_refs);
+
+/*
+ * Prefix all exclude patterns with the namespace, if any. This is required
+ * because exclude patterns apply to the stripped reference name, not the full
+ * reference name with the namespace.
+ */
+const char **get_namespaced_exclude_patterns(const char **exclude_patterns,
+					     const char *namespace,
+					     struct strvec *out);
 
 /* Is this a per-worktree ref living in the refs/ namespace? */
 int is_per_worktree_ref(const char *refname);
@@ -984,7 +1061,7 @@ struct ref_store *get_worktree_ref_store(const struct worktree *wt);
 
 /*
  * Some of the names specified by refs have special meaning to Git.
- * Organize these namespaces in a comon 'ref_namespace' array for
+ * Organize these namespaces in a common 'ref_namespace' array for
  * reference from multiple places in the codebase.
  */
 
@@ -1091,212 +1168,5 @@ int repo_migrate_ref_storage_format(struct repository *repo,
 				    enum ref_storage_format format,
 				    unsigned int flags,
 				    struct strbuf *err);
-
-/*
- * The following functions have been removed in Git v2.45 in favor of functions
- * that receive a `ref_store` as parameter. The intent of this section is
- * merely to help patch authors of in-flight series to have a reference what
- * they should be migrating to. The section will be removed in Git v2.46.
- */
-#if 0
-static char *resolve_refdup(const char *refname, int resolve_flags,
-			    struct object_id *oid, int *flags)
-{
-	return refs_resolve_refdup(get_main_ref_store(the_repository),
-				   refname, resolve_flags,
-				   oid, flags);
-}
-
-static int read_ref_full(const char *refname, int resolve_flags,
-			 struct object_id *oid, int *flags)
-{
-	return refs_read_ref_full(get_main_ref_store(the_repository), refname,
-				  resolve_flags, oid, flags);
-}
-
-static int read_ref(const char *refname, struct object_id *oid)
-{
-	return refs_read_ref(get_main_ref_store(the_repository), refname, oid);
-}
-
-static int ref_exists(const char *refname)
-{
-	return refs_ref_exists(get_main_ref_store(the_repository), refname);
-}
-
-static int for_each_tag_ref(each_ref_fn fn, void *cb_data)
-{
-	return refs_for_each_tag_ref(get_main_ref_store(the_repository), fn, cb_data);
-}
-
-static int for_each_branch_ref(each_ref_fn fn, void *cb_data)
-{
-	return refs_for_each_branch_ref(get_main_ref_store(the_repository), fn, cb_data);
-}
-
-static int for_each_remote_ref(each_ref_fn fn, void *cb_data)
-{
-	return refs_for_each_remote_ref(get_main_ref_store(the_repository), fn, cb_data);
-}
-
-static int head_ref_namespaced(each_ref_fn fn, void *cb_data)
-{
-	return refs_head_ref_namespaced(get_main_ref_store(the_repository),
-					fn, cb_data);
-}
-
-static int for_each_glob_ref_in(each_ref_fn fn, const char *pattern,
-				const char *prefix, void *cb_data)
-{
-	return refs_for_each_glob_ref_in(get_main_ref_store(the_repository),
-					 fn, pattern, prefix, cb_data);
-}
-
-static int for_each_glob_ref(each_ref_fn fn, const char *pattern, void *cb_data)
-{
-	return refs_for_each_glob_ref(get_main_ref_store(the_repository),
-				      fn, pattern, cb_data);
-}
-
-static int delete_ref(const char *msg, const char *refname,
-		      const struct object_id *old_oid, unsigned int flags)
-{
-	return refs_delete_ref(get_main_ref_store(the_repository), msg, refname,
-			       old_oid, flags);
-}
-
-static struct ref_transaction *ref_transaction_begin(struct strbuf *err)
-{
-	return ref_store_transaction_begin(get_main_ref_store(the_repository), err);
-}
-
-static int update_ref(const char *msg, const char *refname,
-		      const struct object_id *new_oid,
-		      const struct object_id *old_oid,
-		      unsigned int flags, enum action_on_err onerr)
-{
-	return refs_update_ref(get_main_ref_store(the_repository), msg, refname, new_oid,
-			       old_oid, flags, onerr);
-}
-
-static char *shorten_unambiguous_ref(const char *refname, int strict)
-{
-	return refs_shorten_unambiguous_ref(get_main_ref_store(the_repository),
-					    refname, strict);
-}
-
-static int head_ref(each_ref_fn fn, void *cb_data)
-{
-	return refs_head_ref(get_main_ref_store(the_repository), fn, cb_data);
-}
-
-static int for_each_ref(each_ref_fn fn, void *cb_data)
-{
-	return refs_for_each_ref(get_main_ref_store(the_repository), fn, cb_data);
-}
-
-static int for_each_ref_in(const char *prefix, each_ref_fn fn, void *cb_data)
-{
-	return refs_for_each_ref_in(get_main_ref_store(the_repository), prefix, fn, cb_data);
-}
-
-static int for_each_fullref_in(const char *prefix,
-			       const char **exclude_patterns,
-			       each_ref_fn fn, void *cb_data)
-{
-	return refs_for_each_fullref_in(get_main_ref_store(the_repository),
-					prefix, exclude_patterns, fn, cb_data);
-}
-
-static int for_each_namespaced_ref(const char **exclude_patterns,
-				   each_ref_fn fn, void *cb_data)
-{
-	return refs_for_each_namespaced_ref(get_main_ref_store(the_repository),
-					    exclude_patterns, fn, cb_data);
-}
-
-static int for_each_rawref(each_ref_fn fn, void *cb_data)
-{
-	return refs_for_each_rawref(get_main_ref_store(the_repository), fn, cb_data);
-}
-
-static const char *resolve_ref_unsafe(const char *refname, int resolve_flags,
-				      struct object_id *oid, int *flags)
-{
-	return refs_resolve_ref_unsafe(get_main_ref_store(the_repository), refname,
-				       resolve_flags, oid, flags);
-}
-
-static int create_symref(const char *ref_target, const char *refs_heads_master,
-			 const char *logmsg)
-{
-	return refs_create_symref(get_main_ref_store(the_repository), ref_target,
-				  refs_heads_master, logmsg);
-}
-
-static int for_each_reflog(each_reflog_fn fn, void *cb_data)
-{
-	return refs_for_each_reflog(get_main_ref_store(the_repository), fn, cb_data);
-}
-
-static int for_each_reflog_ent_reverse(const char *refname, each_reflog_ent_fn fn,
-				       void *cb_data)
-{
-	return refs_for_each_reflog_ent_reverse(get_main_ref_store(the_repository),
-						refname, fn, cb_data);
-}
-
-static int for_each_reflog_ent(const char *refname, each_reflog_ent_fn fn,
-			       void *cb_data)
-{
-	return refs_for_each_reflog_ent(get_main_ref_store(the_repository), refname,
-					fn, cb_data);
-}
-
-static int reflog_exists(const char *refname)
-{
-	return refs_reflog_exists(get_main_ref_store(the_repository), refname);
-}
-
-static int safe_create_reflog(const char *refname, struct strbuf *err)
-{
-	return refs_create_reflog(get_main_ref_store(the_repository), refname,
-				  err);
-}
-
-static int delete_reflog(const char *refname)
-{
-	return refs_delete_reflog(get_main_ref_store(the_repository), refname);
-}
-
-static int reflog_expire(const char *refname,
-			 unsigned int flags,
-			 reflog_expiry_prepare_fn prepare_fn,
-			 reflog_expiry_should_prune_fn should_prune_fn,
-			 reflog_expiry_cleanup_fn cleanup_fn,
-			 void *policy_cb_data)
-{
-	return refs_reflog_expire(get_main_ref_store(the_repository),
-				  refname, flags,
-				  prepare_fn, should_prune_fn,
-				  cleanup_fn, policy_cb_data);
-}
-
-static int delete_refs(const char *msg, struct string_list *refnames,
-		       unsigned int flags)
-{
-	return refs_delete_refs(get_main_ref_store(the_repository), msg, refnames, flags);
-}
-
-static int rename_ref(const char *oldref, const char *newref, const char *logmsg)
-{
-	return refs_rename_ref(get_main_ref_store(the_repository), oldref, newref, logmsg);
-}
-
-static int copy_existing_ref(const char *oldref, const char *newref, const char *logmsg)
-{
-	return refs_copy_existing_ref(get_main_ref_store(the_repository), oldref, newref, logmsg);
-}
-#endif
 
 #endif /* REFS_H */

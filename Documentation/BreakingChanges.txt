@@ -59,10 +59,29 @@ over time. If circumstances change, an earlier decision to deprecate or change
 something may need to be revisited from time to time. So do not take items on
 this list to mean "it is settled, do not waste our time bringing it up again".
 
+== Procedure
+
+Discussing the desire to make breaking changes, declaring that breaking
+changes are made at a certain version boundary, and recording these
+decisions in this document, are necessary but not sufficient.
+Because such changes are expected to be numerous, and the design and
+implementation of them are expected to span over time, they have to
+be deployable trivially at such a version boundary.
+
+The breaking changes MUST be guarded with the a compile-time switch,
+WITH_BREAKING_CHANGES, to help this process.  When built with it,
+the resulting Git binary together with its documentation would
+behave as if these breaking changes slated for the next big version
+boundary are already in effect.  We may also want to have a CI job
+or two to exercise the work-in-progress version of Git with these
+breaking changes.
+
+
 == Git 3.0
 
 The following subsections document upcoming breaking changes for Git 3.0. There
-is no planned release date for this breaking version yet.
+is no planned release date for this breaking version yet.  The early
+adopter configuration used for changes for this release is `feature.git3`.
 
 Proposed changes and removals only include items which are "ready" to be done.
 In other words, this is not supposed to be a wishlist of features that should
@@ -114,6 +133,26 @@ The grafting mechanism has been marked as outdated since e650d0643b (docs: mark
 info/grafts as outdated, 2014-03-05) and will be removed.
 +
 Cf. <20140304174806.GA11561@sigill.intra.peff.net>.
+
+* The git-pack-redundant(1) command can be used to remove redundant pack files.
+  The subcommand is unusably slow and the reason why nobody reports it as a
+  performance bug is suspected to be the absence of users. We have nominated
+  the command for removal and have started to emit a user-visible warning in
+  c3b58472be (pack-redundant: gauge the usage before proposing its removal,
+  2020-08-25) whenever the command is executed.
++
+So far there was a single complaint about somebody still using the command, but
+that complaint did not cause us to reverse course. On the contrary, we have
+doubled down on the deprecation and starting with 4406522b76 (pack-redundant:
+escalate deprecation warning to an error, 2023-03-23), the command dies unless
+the user passes the `--i-still-use-this` option.
++
+There have not been any subsequent complaints, so this command will finally be
+removed.
++
+Cf. <xmqq1rjuz6n3.fsf_-_@gitster.c.googlers.com>,
+    <CAKvOHKAFXQwt4D8yUCCkf_TQL79mYaJ=KAKhtpDNTvHJFuX1NA@mail.gmail.com>,
+    <20230323204047.GA9290@coredump.intra.peff.net>,
 
 == Superseded features that will not be deprecated
 

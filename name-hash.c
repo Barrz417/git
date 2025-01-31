@@ -5,6 +5,10 @@
  *
  * Copyright (C) 2008 Linus Torvalds
  */
+
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "git-compat-util.h"
 #include "environment.h"
 #include "gettext.h"

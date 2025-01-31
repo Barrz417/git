@@ -8,7 +8,11 @@
  * Clone a repository into a different directory that does not yet exist.
  */
 
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
+
 #include "abspath.h"
 #include "advice.h"
 #include "config.h"
@@ -146,8 +150,8 @@ static struct option builtin_clone_options[] = {
 		    N_("create a shallow clone of that depth")),
 	OPT_STRING(0, "shallow-since", &option_since, N_("time"),
 		    N_("create a shallow clone since a specific time")),
-	OPT_STRING_LIST(0, "shallow-exclude", &option_not, N_("revision"),
-			N_("deepen history of shallow clone, excluding rev")),
+	OPT_STRING_LIST(0, "shallow-exclude", &option_not, N_("ref"),
+			N_("deepen history of shallow clone, excluding ref")),
 	OPT_BOOL(0, "single-branch", &option_single_branch,
 		    N_("clone only one branch, HEAD or --branch")),
 	OPT_BOOL(0, "no-tags", &option_no_tags,
@@ -533,7 +537,8 @@ static struct ref *wanted_peer_refs(const struct ref *refs,
 		if (!option_branch)
 			remote_head = guess_remote_head(head, refs, 0);
 		else {
-			local_refs = NULL;
+			free_one_ref(head);
+			local_refs = head = NULL;
 			tail = &local_refs;
 			remote_head = copy_ref(find_remote_branch(refs, option_branch));
 		}
@@ -572,7 +577,7 @@ static void write_remote_refs(const struct ref *local_refs)
 	struct strbuf err = STRBUF_INIT;
 
 	t = ref_store_transaction_begin(get_main_ref_store(the_repository),
-					&err);
+					REF_TRANSACTION_FLAG_INITIAL, &err);
 	if (!t)
 		die("%s", err.buf);
 
@@ -584,7 +589,7 @@ static void write_remote_refs(const struct ref *local_refs)
 			die("%s", err.buf);
 	}
 
-	if (initial_ref_transaction_commit(t, &err))
+	if (ref_transaction_commit(t, &err))
 		die("%s", err.buf);
 
 	strbuf_release(&err);
@@ -728,7 +733,8 @@ static int git_sparse_checkout_init(const char *repo)
 	return result;
 }
 
-static int checkout(int submodule_progress, int filter_submodules)
+static int checkout(int submodule_progress, int filter_submodules,
+		    enum ref_storage_format ref_storage_format)
 {
 	struct object_id oid;
 	char *head;
@@ -787,7 +793,7 @@ static int checkout(int submodule_progress, int filter_submodules)
 	if (write_locked_index(the_repository->index, &lock_file, COMMIT_LOCK))
 		die(_("unable to write new index file"));
 
-	err |= run_hooks_l("post-checkout", oid_to_hex(null_oid()),
+	err |= run_hooks_l(the_repository, "post-checkout", oid_to_hex(null_oid()),
 			   oid_to_hex(&oid), "1", NULL);
 
 	if (!err && (option_recurse_submodules.nr > 0)) {
@@ -811,6 +817,10 @@ static int checkout(int submodule_progress, int filter_submodules)
 			strvec_push(&cmd.args, "--remote");
 			strvec_push(&cmd.args, "--no-fetch");
 		}
+
+		if (ref_storage_format != REF_STORAGE_FORMAT_UNKNOWN)
+			strvec_pushf(&cmd.args, "--ref-format=%s",
+				     ref_storage_format_to_name(ref_storage_format));
 
 		if (filter_submodules && filter_options.choice)
 			strvec_pushf(&cmd.args, "--filter=%s",
@@ -950,7 +960,10 @@ static int path_exists(const char *path)
 	return !stat(path, &sb);
 }
 
-int cmd_clone(int argc, const char **argv, const char *prefix)
+int cmd_clone(int argc,
+	      const char **argv,
+	      const char *prefix,
+	      struct repository *repository UNUSED)
 {
 	int is_bundle = 0, is_local;
 	int reject_shallow = 0;
@@ -1294,7 +1307,7 @@ int cmd_clone(int argc, const char **argv, const char *prefix)
 	refspec_appendf(&remote->fetch, "+%s*:%s*", src_ref_prefix,
 			branch_top.buf);
 
-	path = get_repo_path(remote->url[0], &is_bundle);
+	path = get_repo_path(remote->url.v[0], &is_bundle);
 	is_local = option_local != 0 && path && !is_bundle;
 	if (is_local) {
 		if (option_depth)
@@ -1316,7 +1329,7 @@ int cmd_clone(int argc, const char **argv, const char *prefix)
 	if (option_local > 0 && !is_local)
 		warning(_("--local is ignored"));
 
-	transport = transport_get(remote, path ? path : remote->url[0]);
+	transport = transport_get(remote, path ? path : remote->url.v[0]);
 	transport_set_verbosity(transport, option_verbosity, option_progress);
 	transport->family = family;
 	transport->cloning = 1;
@@ -1393,7 +1406,16 @@ int cmd_clone(int argc, const char **argv, const char *prefix)
 	 * data from the --bundle-uri option.
 	 */
 	if (bundle_uri) {
+		struct remote_state *state;
 		int has_heuristic = 0;
+
+		/*
+		 * We need to save the remote state as our remote's lifetime is
+		 * tied to it.
+		 */
+		state = the_repository->remote_state;
+		the_repository->remote_state = NULL;
+		repo_clear(the_repository);
 
 		/* At this point, we need the_repository to match the cloned repo. */
 		if (repo_init(the_repository, git_dir, work_tree))
@@ -1403,6 +1425,10 @@ int cmd_clone(int argc, const char **argv, const char *prefix)
 				bundle_uri);
 		else if (has_heuristic)
 			git_config_set_gently("fetch.bundleuri", bundle_uri);
+
+		remote_state_clear(the_repository->remote_state);
+		free(the_repository->remote_state);
+		the_repository->remote_state = state;
 	} else {
 		/*
 		* Populate transport->got_remote_bundle_uri and
@@ -1412,12 +1438,26 @@ int cmd_clone(int argc, const char **argv, const char *prefix)
 
 		if (transport->bundles &&
 		    hashmap_get_size(&transport->bundles->bundles)) {
+			struct remote_state *state;
+
+			/*
+			 * We need to save the remote state as our remote's
+			 * lifetime is tied to it.
+			 */
+			state = the_repository->remote_state;
+			the_repository->remote_state = NULL;
+			repo_clear(the_repository);
+
 			/* At this point, we need the_repository to match the cloned repo. */
 			if (repo_init(the_repository, git_dir, work_tree))
 				warning(_("failed to initialize the repo, skipping bundle URI"));
 			else if (fetch_bundle_list(the_repository,
 						   transport->bundles))
 				warning(_("failed to fetch advertised bundles"));
+
+			remote_state_clear(the_repository->remote_state);
+			free(the_repository->remote_state);
+			the_repository->remote_state = state;
 		} else {
 			clear_bundle_list(transport->bundles);
 			FREE_AND_NULL(transport->bundles);
@@ -1535,7 +1575,8 @@ int cmd_clone(int argc, const char **argv, const char *prefix)
 		return 1;
 
 	junk_mode = JUNK_LEAVE_REPO;
-	err = checkout(submodule_progress, filter_submodules);
+	err = checkout(submodule_progress, filter_submodules,
+		       ref_storage_format);
 
 	free(remote_name);
 	strbuf_release(&reflog_msg);
@@ -1548,7 +1589,6 @@ int cmd_clone(int argc, const char **argv, const char *prefix)
 	free(dir);
 	free(path);
 	free(repo_to_free);
-	UNLEAK(repo);
 	junk_mode = JUNK_LEAVE_ALL;
 
 	transport_ls_refs_options_release(&transport_ls_refs_options);

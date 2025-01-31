@@ -5,13 +5,12 @@ test_description='Test advise_if_enabled functionality'
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=trunk
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 test_expect_success 'advice should be printed when config variable is unset' '
 	cat >expect <<-\EOF &&
 	hint: This is a piece of advice
-	hint: Disable this message with "git config advice.nestedTag false"
+	hint: Disable this message with "git config set advice.nestedTag false"
 	EOF
 	test-tool advise "This is a piece of advice" 2>actual &&
 	test_cmp expect actual
@@ -96,7 +95,6 @@ test_expect_success 'advice should be printed when GIT_ADVICE is set to true' '
 		>README &&
 		GIT_ADVICE=true git status
 	) >actual &&
-	cat actual > /tmp/actual &&
 	test_cmp expect actual
 '
 

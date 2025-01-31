@@ -46,6 +46,9 @@ void strvec_init(struct strvec *);
 /* Push a copy of a string onto the end of the array. */
 const char *strvec_push(struct strvec *, const char *);
 
+/* Push an allocated string onto the end of the array, taking ownership. */
+void strvec_push_nodup(struct strvec *array, char *value);
+
 /**
  * Format a string and push it onto the end of the array. This is a
  * convenience wrapper combining `strbuf_addf` and `strvec_push`.
@@ -63,6 +66,15 @@ void strvec_pushl(struct strvec *, ...);
 
 /* Push a null-terminated array of strings onto the end of the array. */
 void strvec_pushv(struct strvec *, const char **);
+
+/*
+ * Replace `len` values starting at `idx` with the provided replacement
+ * strings. If `len` is zero this is effectively an insert at the given `idx`.
+ * If `replacement_len` is zero this is effectively a delete of `len` items
+ * starting at `idx`.
+ */
+void strvec_splice(struct strvec *array, size_t idx, size_t len,
+		   const char **replacement, size_t replacement_len);
 
 /**
  * Replace the value at the given index with a new value. The index must be

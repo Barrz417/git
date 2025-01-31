@@ -7,7 +7,7 @@
 
 begin_group "Install dependencies"
 
-P4WHENCE=https://cdist2.perforce.com/perforce/r21.2
+P4WHENCE=https://cdist2.perforce.com/perforce/r23.2
 LFSWHENCE=https://github.com/github/git-lfs/releases/download/v$LINUX_GIT_LFS_VERSION
 JGITWHENCE=https://repo.eclipse.org/content/groups/releases//org/eclipse/jgit/org.eclipse.jgit.pgm/6.8.0.202311291450-r/org.eclipse.jgit.pgm-6.8.0.202311291450-r.sh
 
@@ -29,41 +29,55 @@ alpine-*)
 		apache2 apache2-http2 apache2-proxy apache2-ssl apache2-webdav apr-util-dbd_sqlite3 \
 		bash cvs gnupg perl-cgi perl-dbd-sqlite perl-io-tty >/dev/null
 	;;
-fedora-*)
+fedora-*|almalinux-*)
 	dnf -yq update >/dev/null &&
 	dnf -yq install make gcc findutils diffutils perl python3 gettext zlib-devel expat-devel openssl-devel curl-devel pcre2-devel >/dev/null
 	;;
-ubuntu-*)
+ubuntu-*|ubuntu32-*|debian-*)
 	# Required so that apt doesn't wait for user input on certain packages.
 	export DEBIAN_FRONTEND=noninteractive
 
+	case "$distro" in
+	ubuntu-*)
+		SVN='libsvn-perl subversion'
+		LANGUAGES='language-pack-is'
+		;;
+	ubuntu32-*)
+		SVN=
+		LANGUAGES='language-pack-is'
+		;;
+	*)
+		SVN='libsvn-perl subversion'
+		LANGUAGES='locales-all'
+		;;
+	esac
+
 	sudo apt-get -q update
 	sudo apt-get -q -y install \
-		language-pack-is libsvn-perl apache2 cvs cvsps git gnupg subversion \
+		$LANGUAGES apache2 cvs cvsps git gnupg $SVN \
 		make libssl-dev libcurl4-openssl-dev libexpat-dev wget sudo default-jre \
 		tcl tk gettext zlib1g-dev perl-modules liberror-perl libauthen-sasl-perl \
 		libemail-valid-perl libio-pty-perl libio-socket-ssl-perl libnet-smtp-ssl-perl libdbd-sqlite3-perl libcgi-pm-perl \
+		libpcre2-dev meson ninja-build pkg-config \
 		${CC_PACKAGE:-${CC:-gcc}} $PYTHON_PACKAGE
 
-	mkdir --parents "$CUSTOM_PATH"
-	wget --quiet --directory-prefix="$CUSTOM_PATH" \
-		"$P4WHENCE/bin.linux26x86_64/p4d" "$P4WHENCE/bin.linux26x86_64/p4"
-	chmod a+x "$CUSTOM_PATH/p4d" "$CUSTOM_PATH/p4"
+	case "$distro" in
+	ubuntu-*)
+		mkdir --parents "$CUSTOM_PATH"
 
-	wget --quiet "$LFSWHENCE/git-lfs-linux-amd64-$LINUX_GIT_LFS_VERSION.tar.gz"
-	tar -xzf "git-lfs-linux-amd64-$LINUX_GIT_LFS_VERSION.tar.gz" \
-		-C "$CUSTOM_PATH" --strip-components=1 "git-lfs-$LINUX_GIT_LFS_VERSION/git-lfs"
-	rm "git-lfs-linux-amd64-$LINUX_GIT_LFS_VERSION.tar.gz"
+		wget --quiet --directory-prefix="$CUSTOM_PATH" \
+			"$P4WHENCE/bin.linux26x86_64/p4d" "$P4WHENCE/bin.linux26x86_64/p4"
+		chmod a+x "$CUSTOM_PATH/p4d" "$CUSTOM_PATH/p4"
 
-	wget --quiet "$JGITWHENCE" --output-document="$CUSTOM_PATH/jgit"
-	chmod a+x "$CUSTOM_PATH/jgit"
-	;;
-ubuntu32-*)
-	sudo linux32 --32bit i386 sh -c '
-		apt update >/dev/null &&
-		apt install -y build-essential libcurl4-openssl-dev \
-			libssl-dev libexpat-dev gettext python >/dev/null
-	'
+		wget --quiet "$LFSWHENCE/git-lfs-linux-amd64-$LINUX_GIT_LFS_VERSION.tar.gz"
+		tar -xzf "git-lfs-linux-amd64-$LINUX_GIT_LFS_VERSION.tar.gz" \
+			-C "$CUSTOM_PATH" --strip-components=1 "git-lfs-$LINUX_GIT_LFS_VERSION/git-lfs"
+		rm "git-lfs-linux-amd64-$LINUX_GIT_LFS_VERSION.tar.gz"
+
+		wget --quiet "$JGITWHENCE" --output-document="$CUSTOM_PATH/jgit"
+		chmod a+x "$CUSTOM_PATH/jgit"
+		;;
+	esac
 	;;
 macos-*)
 	export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1
@@ -77,6 +91,12 @@ macos-*)
 	sudo xattr -d com.apple.quarantine "$CUSTOM_PATH/p4" "$CUSTOM_PATH/p4d" 2>/dev/null || true
 	rm helix-core-server.tgz
 
+	case "$jobname" in
+	osx-meson)
+		brew install meson ninja pcre2
+		;;
+	esac
+
 	if test -n "$CC_PACKAGE"
 	then
 		BREW_PACKAGE=${CC_PACKAGE/-/@}
@@ -87,6 +107,10 @@ macos-*)
 esac
 
 case "$jobname" in
+ClangFormat)
+	sudo apt-get -q update
+	sudo apt-get -q -y install clang-format
+	;;
 StaticAnalysis)
 	sudo apt-get -q update
 	sudo apt-get -q -y install coccinelle libcurl4-openssl-dev libssl-dev \
@@ -103,6 +127,7 @@ Documentation)
 
 	test -n "$ALREADY_HAVE_ASCIIDOCTOR" ||
 	sudo gem install --version 1.5.8 asciidoctor
+	sudo gem install concurrent-ruby
 	;;
 esac
 

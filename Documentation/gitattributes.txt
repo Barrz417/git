@@ -374,7 +374,7 @@ explicitly define the line endings with `eol` if the `working-tree-encoding`
 attribute is used to avoid ambiguity.
 
 ------------------------
-*.ps1		text working-tree-encoding=UTF-16LE eol=CRLF
+*.ps1		text working-tree-encoding=UTF-16LE eol=crlf
 ------------------------
 
 You can get a list of all available encodings on your platform with the
@@ -1166,7 +1166,7 @@ internal merge and the final merge.
 The merge driver can learn the pathname in which the merged result
 will be stored via placeholder `%P`. The conflict labels to be used
 for the common ancestor, local head and other head can be passed by
-using '%S', '%X' and '%Y` respectively.
+using `%S`, `%X` and `%Y` respectively.
 
 `conflict-marker-size`
 ^^^^^^^^^^^^^^^^^^^^^^

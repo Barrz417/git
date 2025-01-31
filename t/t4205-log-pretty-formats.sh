@@ -5,6 +5,7 @@
 #
 
 test_description='Test pretty formats'
+
 . ./test-lib.sh
 
 # Tested non-UTF-8 encoding
@@ -112,19 +113,19 @@ test_expect_success 'alias loop' '
 	test_must_fail git log --pretty=test-foo
 '
 
-test_expect_success 'NUL separation' '
+test_expect_success ICONV 'NUL separation' '
 	printf "add bar\0$(commit_msg)" >expected &&
 	git log -z --pretty="format:%s" >actual &&
 	test_cmp expected actual
 '
 
-test_expect_success 'NUL termination' '
+test_expect_success ICONV 'NUL termination' '
 	printf "add bar\0$(commit_msg)\0" >expected &&
 	git log -z --pretty="tformat:%s" >actual &&
 	test_cmp expected actual
 '
 
-test_expect_success 'NUL separation with --stat' '
+test_expect_success ICONV 'NUL separation with --stat' '
 	stat0_part=$(git diff --stat HEAD^ HEAD) &&
 	stat1_part=$(git diff-tree --no-commit-id --stat --root HEAD^) &&
 	printf "add bar\n$stat0_part\n\0$(commit_msg)\n$stat1_part\n" >expected &&
@@ -135,7 +136,7 @@ test_expect_success 'NUL separation with --stat' '
 test_expect_failure 'NUL termination with --stat' '
 	stat0_part=$(git diff --stat HEAD^ HEAD) &&
 	stat1_part=$(git diff-tree --no-commit-id --stat --root HEAD^) &&
-	printf "add bar\n$stat0_part\n\0$(commit_msg)\n$stat1_part\n0" >expected &&
+	printf "add bar\n$stat0_part\n\0$(commit_msg)\n$stat1_part\n\0" >expected &&
 	git log -z --stat --pretty="tformat:%s" >actual &&
 	test_cmp expected actual
 '
@@ -179,7 +180,7 @@ test_expect_success 'setup more commits' '
 	head4=$(git rev-parse --verify --short HEAD~3)
 '
 
-test_expect_success 'left alignment formatting' '
+test_expect_success ICONV 'left alignment formatting' '
 	git log --pretty="tformat:%<(40)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	message two                            Z
@@ -190,7 +191,7 @@ test_expect_success 'left alignment formatting' '
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting. i18n.logOutputEncoding' '
+test_expect_success ICONV 'left alignment formatting. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%<(40)%s" >actual &&
 	qz_to_tab_space <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	message two                            Z
@@ -201,7 +202,7 @@ test_expect_success 'left alignment formatting. i18n.logOutputEncoding' '
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting at the nth column' '
+test_expect_success ICONV 'left alignment formatting at the nth column' '
 	git log --pretty="tformat:%h %<|(40)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	$head1 message two                    Z
@@ -212,7 +213,7 @@ test_expect_success 'left alignment formatting at the nth column' '
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting at the nth column' '
+test_expect_success ICONV 'left alignment formatting at the nth column' '
 	COLUMNS=50 git log --pretty="tformat:%h %<|(-10)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	$head1 message two                    Z
@@ -223,7 +224,7 @@ test_expect_success 'left alignment formatting at the nth column' '
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting at the nth column. i18n.logOutputEncoding' '
+test_expect_success ICONV 'left alignment formatting at the nth column. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%h %<|(40)%s" >actual &&
 	qz_to_tab_space <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	$head1 message two                    Z
@@ -234,7 +235,7 @@ test_expect_success 'left alignment formatting at the nth column. i18n.logOutput
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting with no padding' '
+test_expect_success ICONV 'left alignment formatting with no padding' '
 	git log --pretty="tformat:%<(1)%s" >actual &&
 	cat <<-EOF >expected &&
 	message two
@@ -256,7 +257,7 @@ test_expect_success 'left alignment formatting with no padding. i18n.logOutputEn
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting with trunc' '
+test_expect_success ICONV 'left alignment formatting with trunc' '
 	git log --pretty="tformat:%<(10,trunc)%s" >actual &&
 	qz_to_tab_space <<-\EOF >expected &&
 	message ..
@@ -267,7 +268,7 @@ test_expect_success 'left alignment formatting with trunc' '
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting with trunc. i18n.logOutputEncoding' '
+test_expect_success ICONV 'left alignment formatting with trunc. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%<(10,trunc)%s" >actual &&
 	qz_to_tab_space <<-\EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	message ..
@@ -278,7 +279,7 @@ test_expect_success 'left alignment formatting with trunc. i18n.logOutputEncodin
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting with ltrunc' '
+test_expect_success ICONV 'left alignment formatting with ltrunc' '
 	git log --pretty="tformat:%<(10,ltrunc)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	..sage two
@@ -289,7 +290,7 @@ test_expect_success 'left alignment formatting with ltrunc' '
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting with ltrunc. i18n.logOutputEncoding' '
+test_expect_success ICONV 'left alignment formatting with ltrunc. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%<(10,ltrunc)%s" >actual &&
 	qz_to_tab_space <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	..sage two
@@ -300,7 +301,7 @@ test_expect_success 'left alignment formatting with ltrunc. i18n.logOutputEncodi
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting with mtrunc' '
+test_expect_success ICONV 'left alignment formatting with mtrunc' '
 	git log --pretty="tformat:%<(10,mtrunc)%s" >actual &&
 	qz_to_tab_space <<-\EOF >expected &&
 	mess.. two
@@ -311,7 +312,7 @@ test_expect_success 'left alignment formatting with mtrunc' '
 	test_cmp expected actual
 '
 
-test_expect_success 'left alignment formatting with mtrunc. i18n.logOutputEncoding' '
+test_expect_success ICONV 'left alignment formatting with mtrunc. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%<(10,mtrunc)%s" >actual &&
 	qz_to_tab_space <<-\EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	mess.. two
@@ -322,7 +323,7 @@ test_expect_success 'left alignment formatting with mtrunc. i18n.logOutputEncodi
 	test_cmp expected actual
 '
 
-test_expect_success 'right alignment formatting' '
+test_expect_success ICONV 'right alignment formatting' '
 	git log --pretty="tformat:%>(40)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	Z                            message two
@@ -333,7 +334,7 @@ test_expect_success 'right alignment formatting' '
 	test_cmp expected actual
 '
 
-test_expect_success 'right alignment formatting. i18n.logOutputEncoding' '
+test_expect_success ICONV 'right alignment formatting. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%>(40)%s" >actual &&
 	qz_to_tab_space <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	Z                            message two
@@ -344,7 +345,7 @@ test_expect_success 'right alignment formatting. i18n.logOutputEncoding' '
 	test_cmp expected actual
 '
 
-test_expect_success 'right alignment formatting at the nth column' '
+test_expect_success ICONV 'right alignment formatting at the nth column' '
 	git log --pretty="tformat:%h %>|(40)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	$head1                      message two
@@ -355,7 +356,7 @@ test_expect_success 'right alignment formatting at the nth column' '
 	test_cmp expected actual
 '
 
-test_expect_success 'right alignment formatting at the nth column' '
+test_expect_success ICONV 'right alignment formatting at the nth column' '
 	COLUMNS=50 git log --pretty="tformat:%h %>|(-10)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	$head1                      message two
@@ -366,7 +367,7 @@ test_expect_success 'right alignment formatting at the nth column' '
 	test_cmp expected actual
 '
 
-test_expect_success 'right alignment formatting at the nth column. i18n.logOutputEncoding' '
+test_expect_success ICONV 'right alignment formatting at the nth column. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%h %>|(40)%s" >actual &&
 	qz_to_tab_space <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	$head1                      message two
@@ -379,7 +380,7 @@ test_expect_success 'right alignment formatting at the nth column. i18n.logOutpu
 
 # Note: Space between 'message' and 'two' should be in the same column
 # as in previous test.
-test_expect_success 'right alignment formatting at the nth column with --graph. i18n.logOutputEncoding' '
+test_expect_success ICONV 'right alignment formatting at the nth column with --graph. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --graph --pretty="tformat:%h %>|(40)%s" >actual &&
 	iconv -f utf-8 -t $test_encoding >expected <<-EOF &&
 	* $head1                    message two
@@ -390,7 +391,7 @@ test_expect_success 'right alignment formatting at the nth column with --graph. 
 	test_cmp expected actual
 '
 
-test_expect_success 'right alignment formatting with no padding' '
+test_expect_success ICONV 'right alignment formatting with no padding' '
 	git log --pretty="tformat:%>(1)%s" >actual &&
 	cat <<-EOF >expected &&
 	message two
@@ -401,7 +402,7 @@ test_expect_success 'right alignment formatting with no padding' '
 	test_cmp expected actual
 '
 
-test_expect_success 'right alignment formatting with no padding and with --graph' '
+test_expect_success ICONV 'right alignment formatting with no padding and with --graph' '
 	git log --graph --pretty="tformat:%>(1)%s" >actual &&
 	cat <<-EOF >expected &&
 	* message two
@@ -412,7 +413,7 @@ test_expect_success 'right alignment formatting with no padding and with --graph
 	test_cmp expected actual
 '
 
-test_expect_success 'right alignment formatting with no padding. i18n.logOutputEncoding' '
+test_expect_success ICONV 'right alignment formatting with no padding. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%>(1)%s" >actual &&
 	cat <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	message two
@@ -423,7 +424,7 @@ test_expect_success 'right alignment formatting with no padding. i18n.logOutputE
 	test_cmp expected actual
 '
 
-test_expect_success 'center alignment formatting' '
+test_expect_success ICONV 'center alignment formatting' '
 	git log --pretty="tformat:%><(40)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	Z             message two              Z
@@ -434,7 +435,7 @@ test_expect_success 'center alignment formatting' '
 	test_cmp expected actual
 '
 
-test_expect_success 'center alignment formatting. i18n.logOutputEncoding' '
+test_expect_success ICONV 'center alignment formatting. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%><(40)%s" >actual &&
 	qz_to_tab_space <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	Z             message two              Z
@@ -444,7 +445,7 @@ test_expect_success 'center alignment formatting. i18n.logOutputEncoding' '
 	EOF
 	test_cmp expected actual
 '
-test_expect_success 'center alignment formatting at the nth column' '
+test_expect_success ICONV 'center alignment formatting at the nth column' '
 	git log --pretty="tformat:%h %><|(40)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	$head1           message two          Z
@@ -455,7 +456,7 @@ test_expect_success 'center alignment formatting at the nth column' '
 	test_cmp expected actual
 '
 
-test_expect_success 'center alignment formatting at the nth column' '
+test_expect_success ICONV 'center alignment formatting at the nth column' '
 	COLUMNS=70 git log --pretty="tformat:%h %><|(-30)%s" >actual &&
 	qz_to_tab_space <<-EOF >expected &&
 	$head1           message two          Z
@@ -466,7 +467,7 @@ test_expect_success 'center alignment formatting at the nth column' '
 	test_cmp expected actual
 '
 
-test_expect_success 'center alignment formatting at the nth column. i18n.logOutputEncoding' '
+test_expect_success ICONV 'center alignment formatting at the nth column. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%h %><|(40)%s" >actual &&
 	qz_to_tab_space <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	$head1           message two          Z
@@ -477,7 +478,7 @@ test_expect_success 'center alignment formatting at the nth column. i18n.logOutp
 	test_cmp expected actual
 '
 
-test_expect_success 'center alignment formatting with no padding' '
+test_expect_success ICONV 'center alignment formatting with no padding' '
 	git log --pretty="tformat:%><(1)%s" >actual &&
 	cat <<-EOF >expected &&
 	message two
@@ -491,7 +492,7 @@ test_expect_success 'center alignment formatting with no padding' '
 # save HEAD's SHA-1 digest (with no abbreviations) to use it below
 # as far as the next test amends HEAD
 old_head1=$(git rev-parse --verify HEAD~0)
-test_expect_success 'center alignment formatting with no padding. i18n.logOutputEncoding' '
+test_expect_success ICONV 'center alignment formatting with no padding. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%><(1)%s" >actual &&
 	cat <<-EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	message two
@@ -502,7 +503,7 @@ test_expect_success 'center alignment formatting with no padding. i18n.logOutput
 	test_cmp expected actual
 '
 
-test_expect_success 'left/right alignment formatting with stealing' '
+test_expect_success ICONV 'left/right alignment formatting with stealing' '
 	git commit --amend -m short --author "long long long <long@me.com>" &&
 	git log --pretty="tformat:%<(10,trunc)%s%>>(10,ltrunc)% an" >actual &&
 	cat <<-\EOF >expected &&
@@ -513,7 +514,7 @@ test_expect_success 'left/right alignment formatting with stealing' '
 	EOF
 	test_cmp expected actual
 '
-test_expect_success 'left/right alignment formatting with stealing. i18n.logOutputEncoding' '
+test_expect_success ICONV 'left/right alignment formatting with stealing. i18n.logOutputEncoding' '
 	git -c i18n.logOutputEncoding=$test_encoding log --pretty="tformat:%<(10,trunc)%s%>>(10,ltrunc)% an" >actual &&
 	cat <<-\EOF | iconv -f utf-8 -t $test_encoding >expected &&
 	short long  long long
@@ -562,22 +563,38 @@ test_expect_success 'log decoration properly follows tag chain' '
 	git tag -d tag1 &&
 	git commit --amend -m shorter &&
 	git log --no-walk --tags --pretty="%H %d" --decorate=full >actual &&
-	cat <<-EOF >expected &&
-	$head2  (tag: refs/tags/message-one)
-	$old_head1  (tag: refs/tags/message-two)
-	$head1  (tag: refs/tags/tag2)
-	EOF
+	if test_have_prereq ICONV
+	then
+		cat <<-EOF >expected
+		$head2  (tag: refs/tags/message-one)
+		$old_head1  (tag: refs/tags/message-two)
+		$head1  (tag: refs/tags/tag2)
+		EOF
+	else
+		cat <<-EOF >expected
+		$head2  (tag: refs/tags/message-one)
+		$old_head1  (tag: refs/tags/tag2, tag: refs/tags/message-two)
+		EOF
+	fi &&
 	sort -k3 actual >actual1 &&
 	test_cmp expected actual1
 '
 
 test_expect_success 'clean log decoration' '
 	git log --no-walk --tags --pretty="%H %D" --decorate=full >actual &&
-	cat >expected <<-EOF &&
-	$head2 tag: refs/tags/message-one
-	$old_head1 tag: refs/tags/message-two
-	$head1 tag: refs/tags/tag2
-	EOF
+	if test_have_prereq ICONV
+	then
+		cat <<-EOF >expected
+		$head2 tag: refs/tags/message-one
+		$old_head1 tag: refs/tags/message-two
+		$head1 tag: refs/tags/tag2
+		EOF
+	else
+		cat <<-EOF >expected
+		$head2 tag: refs/tags/message-one
+		$old_head1 tag: refs/tags/tag2, tag: refs/tags/message-two
+		EOF
+	fi &&
 	sort -k3 actual >actual1 &&
 	test_cmp expected actual1
 '

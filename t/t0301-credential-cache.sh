@@ -1,6 +1,7 @@
 #!/bin/sh
 
 test_description='credential-cache tests'
+
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-credential.sh
 

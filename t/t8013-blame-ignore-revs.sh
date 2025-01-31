@@ -1,6 +1,7 @@
 #!/bin/sh
 
 test_description='ignore revisions when blaming'
+
 . ./test-lib.sh
 
 # Creates:

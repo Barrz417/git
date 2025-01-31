@@ -8,7 +8,6 @@ test_description='Test git config in different settings'
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 for mode in legacy subcommands
@@ -2702,6 +2701,15 @@ test_expect_success '--get and --get-all with --fixed-value' '
 	git config --file=config --get-regexp --fixed-value fixed+ "$META" &&
 	git config get --regexp --file=config --fixed-value --value="$META" fixed+ &&
 	test_must_fail git config --file=config --get-regexp --fixed-value fixed+ non-existent
+'
+
+test_expect_success '--fixed-value with value-less configuration' '
+	test_when_finished rm -f config &&
+	cat >config <<-\EOF &&
+	[section]
+		key
+	EOF
+	git config --file=config --fixed-value section.key value pattern
 '
 
 test_expect_success 'includeIf.hasconfig:remote.*.url' '

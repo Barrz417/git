@@ -2,7 +2,6 @@
 
 test_description='test trace2 facility (normal target)'
 
-TEST_PASSES_SANITIZE_LEAK=false
 . ./test-lib.sh
 
 # Turn off any inherited trace2 settings for this test.
@@ -241,6 +240,15 @@ test_expect_success 'bug messages followed by BUG() are written to trace2' '
 		exit elapsed:_TIME_ code:99
 		atexit elapsed:_TIME_ code:99
 	EOF
+	test_cmp expect actual
+'
+
+test_expect_success 'a valueless true configuration variable is handled' '
+	test_when_finished "rm -f trace2.normal actual expect" &&
+	echo >expect &&
+	GIT_TRACE2="$(pwd)/trace2.normal" \
+	GIT_TRACE2_CONFIG_PARAMS=foo.true \
+	git -c foo.true config foo.true >actual &&
 	test_cmp expect actual
 '
 

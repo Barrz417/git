@@ -1,6 +1,9 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
 #include "abspath.h"
-#include "repository.h"
+
 #include "config.h"
 #include "environment.h"
 #include "gettext.h"
@@ -171,7 +174,7 @@ static int receive_pack_config(const char *var, const char *value,
 		char *path;
 
 		if (git_config_pathname(&path, var, value))
-			return 1;
+			return -1;
 		strbuf_addf(&fsck_msg_types, "%cskiplist=%s",
 			fsck_msg_types.len ? ',' : '=', path);
 		free(path);
@@ -300,7 +303,7 @@ static void show_ref(const char *path, const struct object_id *oid)
 	}
 }
 
-static int show_ref_cb(const char *path_full, const struct object_id *oid,
+static int show_ref_cb(const char *path_full, const char *referent UNUSED, const struct object_id *oid,
 		       int flag UNUSED, void *data)
 {
 	struct oidset *seen = data;
@@ -339,12 +342,26 @@ static void show_one_alternate_ref(const struct object_id *oid,
 static void write_head_info(void)
 {
 	static struct oidset seen = OIDSET_INIT;
+	struct strvec excludes_vector = STRVEC_INIT;
+	const char **exclude_patterns;
+
+	/*
+	 * We need access to the reference names both with and without their
+	 * namespace and thus cannot use `refs_for_each_namespaced_ref()`. We
+	 * thus have to adapt exclude patterns to carry the namespace prefix
+	 * ourselves.
+	 */
+	exclude_patterns = get_namespaced_exclude_patterns(
+		hidden_refs_to_excludes(&hidden_refs),
+		get_git_namespace(), &excludes_vector);
 
 	refs_for_each_fullref_in(get_main_ref_store(the_repository), "",
-				 hidden_refs_to_excludes(&hidden_refs),
-				 show_ref_cb, &seen);
+				 exclude_patterns, show_ref_cb, &seen);
 	for_each_alternate_ref(show_one_alternate_ref, &seen);
+
 	oidset_clear(&seen);
+	strvec_clear(&excludes_vector);
+
 	if (!sent_capabilities)
 		show_ref("capabilities^{}", null_oid());
 
@@ -359,6 +376,7 @@ static void write_head_info(void)
 struct command {
 	struct command *next;
 	const char *error_string;
+	char *error_string_owned;
 	struct ref_push_report *report;
 	unsigned int skip_update:1,
 		     did_not_exist:1,
@@ -741,7 +759,7 @@ static void prepare_push_cert_sha1(struct child_process *proc)
 		already_done = 1;
 		if (write_object_file(push_cert.buf, push_cert.len, OBJ_BLOB,
 				      &push_cert_oid))
-			oidclr(&push_cert_oid);
+			oidclr(&push_cert_oid, the_repository->hash_algo);
 
 		memset(&sigcheck, '\0', sizeof(sigcheck));
 
@@ -792,7 +810,7 @@ static int run_and_feed_hook(const char *hook_name, feed_fn feed,
 	struct child_process proc = CHILD_PROCESS_INIT;
 	struct async muxer;
 	int code;
-	const char *hook_path = find_hook(hook_name);
+	const char *hook_path = find_hook(the_repository, hook_name);
 
 	if (!hook_path)
 		return 0;
@@ -922,7 +940,7 @@ static int run_update_hook(struct command *cmd)
 {
 	struct child_process proc = CHILD_PROCESS_INIT;
 	int code;
-	const char *hook_path = find_hook("update");
+	const char *hook_path = find_hook(the_repository, "update");
 
 	if (!hook_path)
 		return 0;
@@ -1068,7 +1086,7 @@ static int read_proc_receive_report(struct packet_reader *reader,
 		hint->run_proc_receive |= RUN_PROC_RECEIVE_RETURNED;
 		if (!strcmp(head, "ng")) {
 			if (p)
-				hint->error_string = xstrdup(p);
+				hint->error_string = hint->error_string_owned = xstrdup(p);
 			else
 				hint->error_string = "failed";
 			code = -1;
@@ -1098,7 +1116,7 @@ static int run_proc_receive_hook(struct command *commands,
 	int hook_use_push_options = 0;
 	int version = 0;
 	int code;
-	const char *hook_path = find_hook("proc-receive");
+	const char *hook_path = find_hook(the_repository, "proc-receive");
 
 	if (!hook_path) {
 		rp_error("cannot find hook 'proc-receive'");
@@ -1324,7 +1342,7 @@ static int update_shallow_ref(struct command *cmd, struct shallow_info *si)
 }
 
 /*
- * NEEDSWORK: we should consolidate various implementions of "are we
+ * NEEDSWORK: we should consolidate various implementations of "are we
  * on an unborn branch?" test into one, and make the unified one more
  * robust. !get_sha1() based check used here and elsewhere would not
  * allow us to tell an unborn branch from corrupt ref, for example.
@@ -1371,7 +1389,7 @@ static const char *push_to_deploy(unsigned char *sha1,
 	strvec_pushl(&child.args, "diff-index", "--quiet", "--cached",
 		     "--ignore-submodules",
 		     /* diff-index with either HEAD or an empty tree */
-		     head_has_history() ? "HEAD" : empty_tree_oid_hex(),
+		     head_has_history() ? "HEAD" : empty_tree_oid_hex(the_repository->hash_algo),
 		     "--", NULL);
 	strvec_pushv(&child.env, env->v);
 	child.no_stdin = 1;
@@ -1409,7 +1427,7 @@ static const char *push_to_checkout(unsigned char *hash,
 	strvec_pushf(env, "GIT_WORK_TREE=%s", absolute_path(work_tree));
 	strvec_pushv(&opt.env, env->v);
 	strvec_push(&opt.args, hash_to_hex(hash));
-	if (run_hooks_opt(push_to_checkout_hook, &opt))
+	if (run_hooks_opt(the_repository, push_to_checkout_hook, &opt))
 		return "push-to-checkout hook declined";
 	else
 		return NULL;
@@ -1618,7 +1636,7 @@ static void run_update_post_hook(struct command *commands)
 	struct child_process proc = CHILD_PROCESS_INIT;
 	const char *hook;
 
-	hook = find_hook("post-update");
+	hook = find_hook(the_repository, "post-update");
 	if (!hook)
 		return;
 
@@ -1833,7 +1851,7 @@ static void execute_commands_non_atomic(struct command *commands,
 			continue;
 
 		transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-							  &err);
+							  0, &err);
 		if (!transaction) {
 			rp_error("%s", err.buf);
 			strbuf_reset(&err);
@@ -1862,7 +1880,7 @@ static void execute_commands_atomic(struct command *commands,
 	const char *reported_error = "atomic push failure";
 
 	transaction = ref_store_transaction_begin(get_main_ref_store(the_repository),
-						  &err);
+						  0, &err);
 	if (!transaction) {
 		rp_error("%s", err.buf);
 		strbuf_reset(&err);
@@ -2039,6 +2057,8 @@ static void free_commands(struct command *commands)
 	while (commands) {
 		struct command *next = commands->next;
 
+		ref_push_report_free(commands->report);
+		free(commands->error_string_owned);
 		free(commands);
 		commands = next;
 	}
@@ -2219,7 +2239,7 @@ static const char *unpack(int err_fd, struct shallow_info *si)
 		strvec_push(&child.args, alt_shallow_file);
 	}
 
-	tmp_objdir = tmp_objdir_create("incoming");
+	tmp_objdir = tmp_objdir_create(the_repository, "incoming");
 	if (!tmp_objdir) {
 		if (err_fd > 0)
 			close(err_fd);
@@ -2480,7 +2500,10 @@ static int delete_only(struct command *commands)
 	return 1;
 }
 
-int cmd_receive_pack(int argc, const char **argv, const char *prefix)
+int cmd_receive_pack(int argc,
+		     const char **argv,
+		     const char *prefix,
+		     struct repository *repo UNUSED)
 {
 	int advertise_refs = 0;
 	struct command *commands;
@@ -2605,7 +2628,7 @@ int cmd_receive_pack(int argc, const char **argv, const char *prefix)
 			}
 		}
 		if (auto_update_server_info)
-			update_server_info(0);
+			update_server_info(the_repository, 0);
 		clear_shallow_info(&si);
 	}
 	if (use_sideband)

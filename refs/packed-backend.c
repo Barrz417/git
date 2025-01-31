@@ -1,3 +1,6 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "../git-compat-util.h"
 #include "../config.h"
 #include "../dir.h"
@@ -11,6 +14,7 @@
 #include "../lockfile.h"
 #include "../chdir-notify.h"
 #include "../statinfo.h"
+#include "../worktree.h"
 #include "../wrapper.h"
 #include "../write-or-die.h"
 #include "../trace2.h"
@@ -792,7 +796,7 @@ static int packed_read_raw_ref(struct ref_store *ref_store, const char *refname,
 		return -1;
 	}
 
-	if (get_oid_hex(rec, oid))
+	if (get_oid_hex_algop(rec, oid, ref_store->repo->hash_algo))
 		die_invalid_line(refs->path, rec, snapshot->eof - rec);
 
 	*type = REF_ISPACKED;
@@ -877,7 +881,7 @@ static int next_record(struct packed_ref_iterator *iter)
 	p = iter->pos;
 
 	if (iter->eof - p < snapshot_hexsz(iter->snapshot) + 2 ||
-	    parse_oid_hex(p, &iter->oid, &p) ||
+	    parse_oid_hex_algop(p, &iter->oid, &p, iter->repo->hash_algo) ||
 	    !isspace(*p++))
 		die_invalid_line(iter->snapshot->refs->path,
 				 iter->pos, iter->eof - iter->pos);
@@ -894,7 +898,7 @@ static int next_record(struct packed_ref_iterator *iter)
 		if (!refname_is_safe(iter->base.refname))
 			die("packed refname is dangerous: %s",
 			    iter->base.refname);
-		oidclr(&iter->oid);
+		oidclr(&iter->oid, iter->repo->hash_algo);
 		iter->base.flags |= REF_BAD_NAME | REF_ISBROKEN;
 	}
 	if (iter->snapshot->peeled == PEELED_FULLY ||
@@ -907,7 +911,7 @@ static int next_record(struct packed_ref_iterator *iter)
 	if (iter->pos < iter->eof && *iter->pos == '^') {
 		p = iter->pos + 1;
 		if (iter->eof - p < snapshot_hexsz(iter->snapshot) + 1 ||
-		    parse_oid_hex(p, &iter->peeled, &p) ||
+		    parse_oid_hex_algop(p, &iter->peeled, &p, iter->repo->hash_algo) ||
 		    *p++ != '\n')
 			die_invalid_line(iter->snapshot->refs->path,
 					 iter->pos, iter->eof - iter->pos);
@@ -919,13 +923,13 @@ static int next_record(struct packed_ref_iterator *iter)
 		 * we suppress it if the reference is broken:
 		 */
 		if ((iter->base.flags & REF_ISBROKEN)) {
-			oidclr(&iter->peeled);
+			oidclr(&iter->peeled, iter->repo->hash_algo);
 			iter->base.flags &= ~REF_KNOWS_PEELED;
 		} else {
 			iter->base.flags |= REF_KNOWS_PEELED;
 		}
 	} else {
-		oidclr(&iter->peeled);
+		oidclr(&iter->peeled, iter->repo->hash_algo);
 	}
 
 	return ITER_OK;
@@ -1246,6 +1250,24 @@ int packed_refs_is_locked(struct ref_store *ref_store)
 			"packed_refs_is_locked");
 
 	return is_lock_file_locked(&refs->lock);
+}
+
+int packed_refs_size(struct ref_store *ref_store,
+		     size_t *out)
+{
+	struct packed_ref_store *refs = packed_downcast(ref_store, REF_STORE_READ,
+							"packed_refs_size");
+	struct stat st;
+
+	if (stat(refs->path, &st) < 0) {
+		if (errno != ENOENT)
+			return -1;
+		*out = 0;
+		return 0;
+	}
+
+	*out = st.st_size;
+	return 0;
 }
 
 /*
@@ -1710,13 +1732,6 @@ cleanup:
 	return ret;
 }
 
-static int packed_initial_transaction_commit(struct ref_store *ref_store UNUSED,
-					    struct ref_transaction *transaction,
-					    struct strbuf *err)
-{
-	return ref_transaction_commit(transaction, err);
-}
-
 static int packed_pack_refs(struct ref_store *ref_store UNUSED,
 			    struct pack_refs_opts *pack_opts UNUSED)
 {
@@ -1733,6 +1748,17 @@ static struct ref_iterator *packed_reflog_iterator_begin(struct ref_store *ref_s
 	return empty_ref_iterator_begin();
 }
 
+static int packed_fsck(struct ref_store *ref_store UNUSED,
+		       struct fsck_options *o UNUSED,
+		       struct worktree *wt)
+{
+
+	if (!is_main_worktree(wt))
+		return 0;
+
+	return 0;
+}
+
 struct ref_storage_be refs_be_packed = {
 	.name = "packed",
 	.init = packed_ref_store_init,
@@ -1743,7 +1769,6 @@ struct ref_storage_be refs_be_packed = {
 	.transaction_prepare = packed_transaction_prepare,
 	.transaction_finish = packed_transaction_finish,
 	.transaction_abort = packed_transaction_abort,
-	.initial_transaction_commit = packed_initial_transaction_commit,
 
 	.pack_refs = packed_pack_refs,
 	.rename_ref = NULL,
@@ -1760,4 +1785,6 @@ struct ref_storage_be refs_be_packed = {
 	.create_reflog = NULL,
 	.delete_reflog = NULL,
 	.reflog_expire = NULL,
+
+	.fsck = packed_fsck,
 };

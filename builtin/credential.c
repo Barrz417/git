@@ -1,3 +1,5 @@
+#define USE_THE_REPOSITORY_VARIABLE
+
 #include "git-compat-util.h"
 #include "credential.h"
 #include "builtin.h"
@@ -6,14 +8,18 @@
 static const char usage_msg[] =
 	"git credential (fill|approve|reject)";
 
-int cmd_credential(int argc, const char **argv, const char *prefix UNUSED)
+int cmd_credential(int argc,
+		   const char **argv,
+		   const char *prefix UNUSED,
+		   struct repository *repo UNUSED)
 {
 	const char *op;
 	struct credential c = CREDENTIAL_INIT;
 
 	git_config(git_default_config, NULL);
 
-	if (argc != 2 || !strcmp(argv[1], "-h"))
+	show_usage_if_asked(argc, argv, usage_msg);
+	if (argc != 2)
 		usage(usage_msg);
 	op = argv[1];
 
@@ -27,15 +33,15 @@ int cmd_credential(int argc, const char **argv, const char *prefix UNUSED)
 		die("unable to read credential from stdin");
 
 	if (!strcmp(op, "fill")) {
-		credential_fill(&c, 0);
+		credential_fill(the_repository, &c, 0);
 		credential_next_state(&c);
 		credential_write(&c, stdout, CREDENTIAL_OP_RESPONSE);
 	} else if (!strcmp(op, "approve")) {
 		credential_set_all_capabilities(&c, CREDENTIAL_OP_HELPER);
-		credential_approve(&c);
+		credential_approve(the_repository, &c);
 	} else if (!strcmp(op, "reject")) {
 		credential_set_all_capabilities(&c, CREDENTIAL_OP_HELPER);
-		credential_reject(&c);
+		credential_reject(the_repository, &c);
 	} else {
 		usage(usage_msg);
 	}

@@ -1,11 +1,10 @@
 #ifndef REPOSITORY_H
 #define REPOSITORY_H
 
-#include "refs.h"
 #include "strmap.h"
+#include "repo-settings.h"
 
 struct config_set;
-struct fsmonitor_settings;
 struct git_hash_algo;
 struct index_state;
 struct lock_file;
@@ -15,51 +14,10 @@ struct submodule_cache;
 struct promisor_remote_config;
 struct remote_state;
 
-enum untracked_cache_setting {
-	UNTRACKED_CACHE_KEEP,
-	UNTRACKED_CACHE_REMOVE,
-	UNTRACKED_CACHE_WRITE,
-};
-
-enum fetch_negotiation_setting {
-	FETCH_NEGOTIATION_CONSECUTIVE,
-	FETCH_NEGOTIATION_SKIPPING,
-	FETCH_NEGOTIATION_NOOP,
-};
-
-struct repo_settings {
-	int initialized;
-
-	int core_commit_graph;
-	int commit_graph_generation_version;
-	int commit_graph_read_changed_paths;
-	int gc_write_commit_graph;
-	int fetch_write_commit_graph;
-	int command_requires_full_index;
-	int sparse_index;
-	int pack_read_reverse_index;
-	int pack_use_bitmap_boundary_traversal;
-	int pack_use_multi_pack_reuse;
-
-	/*
-	 * Does this repository have core.useReplaceRefs=true (on by
-	 * default)? This provides a repository-scoped version of this
-	 * config, though it could be disabled process-wide via some Git
-	 * builtins or the --no-replace-objects option. See
-	 * replace_refs_enabled() for more details.
-	 */
-	int read_replace_refs;
-
-	struct fsmonitor_settings *fsmonitor; /* lazily loaded */
-
-	int index_version;
-	int index_skip_hash;
-	enum untracked_cache_setting core_untracked_cache;
-
-	int pack_use_sparse;
-	enum fetch_negotiation_setting fetch_negotiation_algorithm;
-
-	int core_multi_pack_index;
+enum ref_storage_format {
+	REF_STORAGE_FORMAT_UNKNOWN,
+	REF_STORAGE_FORMAT_FILES,
+	REF_STORAGE_FORMAT_REFTABLE,
 };
 
 struct repo_path_cache {
@@ -192,12 +150,22 @@ struct repository {
 
 	/* Configurations */
 	int repository_format_worktree_config;
+	int repository_format_relative_worktrees;
 
 	/* Indicate if a repository has a different 'commondir' from 'gitdir' */
 	unsigned different_commondir:1;
 };
 
+#ifdef USE_THE_REPOSITORY_VARIABLE
 extern struct repository *the_repository;
+#endif
+
+const char *repo_get_git_dir(struct repository *repo);
+const char *repo_get_common_dir(struct repository *repo);
+const char *repo_get_object_directory(struct repository *repo);
+const char *repo_get_index_file(struct repository *repo);
+const char *repo_get_graft_file(struct repository *repo);
+const char *repo_get_work_tree(struct repository *repo);
 
 /*
  * Define a custom repository layout. Any field can be NULL, which
@@ -258,8 +226,6 @@ int repo_read_index_unmerged(struct repository *);
  * The lockfile is always committed or rolled back.
  */
 void repo_update_index_if_able(struct repository *, struct lock_file *);
-
-void prepare_repo_settings(struct repository *r);
 
 /*
  * Return 1 if upgrade repository format to target_version succeeded,

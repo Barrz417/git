@@ -1,6 +1,7 @@
 #!/bin/sh
 
 test_description='test textconv caching'
+
 . ./test-lib.sh
 
 cat >helper <<'EOF'

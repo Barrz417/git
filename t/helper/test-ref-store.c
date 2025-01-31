@@ -1,3 +1,5 @@
+#define USE_THE_REPOSITORY_VARIABLE
+
 #include "test-tool.h"
 #include "hex.h"
 #include "refs.h"
@@ -22,14 +24,13 @@ struct flag_definition {
 static unsigned int parse_flags(const char *str, struct flag_definition *defs)
 {
 	struct string_list masks = STRING_LIST_INIT_DUP;
-	int i = 0;
 	unsigned int result = 0;
 
 	if (!strcmp(str, "0"))
 		return 0;
 
 	string_list_split(&masks, str, ',', 64);
-	for (; i < masks.nr; i++) {
+	for (size_t i = 0; i < masks.nr; i++) {
 		const char *name = masks.items[i].string;
 		struct flag_definition *def = defs;
 		int found = 0;
@@ -154,7 +155,7 @@ static int cmd_rename_ref(struct ref_store *refs, const char **argv)
 	return refs_rename_ref(refs, oldref, newref, logmsg);
 }
 
-static int each_ref(const char *refname, const struct object_id *oid,
+static int each_ref(const char *refname, const char *referent UNUSED, const struct object_id *oid,
 		    int flags, void *cb_data UNUSED)
 {
 	printf("%s %s 0x%x\n", oid_to_hex(oid), refname, flags);
@@ -197,7 +198,7 @@ static int cmd_verify_ref(struct ref_store *refs, const char **argv)
 	struct strbuf err = STRBUF_INIT;
 	int ret;
 
-	ret = refs_verify_refname_available(refs, refname, NULL, NULL, &err);
+	ret = refs_verify_refname_available(refs, refname, NULL, NULL, 0, &err);
 	if (err.len)
 		puts(err.buf);
 	return ret;

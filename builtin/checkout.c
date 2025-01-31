@@ -1,3 +1,6 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
 #include "advice.h"
 #include "branch.h"
@@ -23,6 +26,7 @@
 #include "read-cache.h"
 #include "refs.h"
 #include "remote.h"
+#include "repo-settings.h"
 #include "resolve-undo.h"
 #include "revision.h"
 #include "setup.h"
@@ -125,7 +129,7 @@ static void branch_info_release(struct branch_info *info)
 static int post_checkout_hook(struct commit *old_commit, struct commit *new_commit,
 			      int changed)
 {
-	return run_hooks_l("post-checkout",
+	return run_hooks_l(the_repository, "post-checkout",
 			   oid_to_hex(old_commit ? &old_commit->object.oid : null_oid()),
 			   oid_to_hex(new_commit ? &new_commit->object.oid : null_oid()),
 			   changed ? "1" : "0", NULL);
@@ -740,7 +744,7 @@ static void setup_branch_path(struct branch_info *branch)
 			   &branch->oid, &branch->refname, 0))
 		repo_get_oid_committish(the_repository, branch->name, &branch->oid);
 
-	strbuf_branchname(&buf, branch->name, INTERPRET_BRANCH_LOCAL);
+	copy_branchname(&buf, branch->name, INTERPRET_BRANCH_LOCAL);
 	if (strcmp(buf.buf, branch->name)) {
 		free(branch->name);
 		branch->name = xstrdup(buf.buf);
@@ -884,7 +888,7 @@ static int merge_working_tree(const struct checkout_opts *opts,
 
 			add_files_to_cache(the_repository, NULL, NULL, NULL, 0,
 					   0);
-			init_merge_options(&o, the_repository);
+			init_ui_merge_options(&o, the_repository);
 			o.verbosity = 0;
 			work = write_in_core_index_as_tree(the_repository);
 
@@ -950,11 +954,13 @@ static void update_refs_for_switch(const struct checkout_opts *opts,
 	const char *old_desc, *reflog_msg;
 	if (opts->new_branch) {
 		if (opts->new_orphan_branch) {
+			enum log_refs_config log_all_ref_updates =
+				repo_settings_get_log_all_ref_updates(the_repository);
 			char *refname;
 
 			refname = mkpathdup("refs/heads/%s", opts->new_orphan_branch);
 			if (opts->new_branch_log &&
-			    !should_autocreate_reflog(refname)) {
+			    !should_autocreate_reflog(log_all_ref_updates, refname)) {
 				int ret;
 				struct strbuf err = STRBUF_INIT;
 
@@ -1045,7 +1051,7 @@ static void update_refs_for_switch(const struct checkout_opts *opts,
 		report_tracking(new_branch_info);
 }
 
-static int add_pending_uninteresting_ref(const char *refname,
+static int add_pending_uninteresting_ref(const char *refname, const char *referent UNUSED,
 					 const struct object_id *oid,
 					 int flags UNUSED, void *cb_data)
 {
@@ -1572,6 +1578,10 @@ static void die_if_switching_to_a_branch_in_use(struct checkout_opts *opts,
 static int checkout_branch(struct checkout_opts *opts,
 			   struct branch_info *new_branch_info)
 {
+	int noop_switch = (!new_branch_info->name &&
+			   !opts->new_branch &&
+			   !opts->force_detach);
+
 	if (opts->pathspec.nr)
 		die(_("paths cannot be used with switching branches"));
 
@@ -1583,9 +1593,14 @@ static int checkout_branch(struct checkout_opts *opts,
 		die(_("'%s' cannot be used with switching branches"),
 		    "--[no]-overlay");
 
-	if (opts->writeout_stage)
-		die(_("'%s' cannot be used with switching branches"),
-		    "--ours/--theirs");
+	if (opts->writeout_stage) {
+		const char *msg;
+		if (noop_switch)
+			msg = _("'%s' needs the paths to check out");
+		else
+			msg = _("'%s' cannot be used with switching branches");
+		die(msg, "--ours/--theirs");
+	}
 
 	if (opts->force && opts->merge)
 		die(_("'%s' cannot be used with '%s'"), "-f", "-m");
@@ -1612,10 +1627,8 @@ static int checkout_branch(struct checkout_opts *opts,
 		die(_("Cannot switch branch to a non-commit '%s'"),
 		    new_branch_info->name);
 
-	if (!opts->switch_branch_doing_nothing_is_ok &&
-	    !new_branch_info->name &&
-	    !opts->new_branch &&
-	    !opts->force_detach)
+	if (noop_switch &&
+	    !opts->switch_branch_doing_nothing_is_ok)
 		die(_("missing branch or commit argument"));
 
 	if (!opts->implicit_detach &&
@@ -1705,7 +1718,7 @@ static struct option *add_common_switch_branch_options(
 			   N_("update ignored files (default)"),
 			   PARSE_OPT_NOCOMPLETE),
 		OPT_BOOL(0, "ignore-other-worktrees", &opts->ignore_other_worktrees,
-			 N_("do not check if another worktree is holding the given ref")),
+			 N_("do not check if another worktree is using this branch")),
 		OPT_END()
 	};
 	struct option *newopts = parse_options_concat(prevopts, options);
@@ -1946,7 +1959,10 @@ static int checkout_main(int argc, const char **argv, const char *prefix,
 	return ret;
 }
 
-int cmd_checkout(int argc, const char **argv, const char *prefix)
+int cmd_checkout(int argc,
+		 const char **argv,
+		 const char *prefix,
+		 struct repository *repo UNUSED)
 {
 	struct checkout_opts opts = CHECKOUT_OPTS_INIT;
 	struct option *options;
@@ -1993,7 +2009,10 @@ int cmd_checkout(int argc, const char **argv, const char *prefix)
 			     checkout_usage);
 }
 
-int cmd_switch(int argc, const char **argv, const char *prefix)
+int cmd_switch(int argc,
+	       const char **argv,
+	       const char *prefix,
+	       struct repository *repo UNUSED)
 {
 	struct checkout_opts opts = CHECKOUT_OPTS_INIT;
 	struct option *options = NULL;
@@ -2029,7 +2048,10 @@ int cmd_switch(int argc, const char **argv, const char *prefix)
 			     switch_branch_usage);
 }
 
-int cmd_restore(int argc, const char **argv, const char *prefix)
+int cmd_restore(int argc,
+		const char **argv,
+		const char *prefix,
+		struct repository *repo UNUSED)
 {
 	struct checkout_opts opts = CHECKOUT_OPTS_INIT;
 	struct option *options;

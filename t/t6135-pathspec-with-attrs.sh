@@ -1,6 +1,7 @@
 #!/bin/sh
 
 test_description='test labels in pathspecs'
+
 . ./test-lib.sh
 
 test_expect_success 'setup a tree' '

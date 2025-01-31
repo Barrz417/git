@@ -1,3 +1,6 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "git-compat-util.h"
 #include "abspath.h"
 #include "config.h"
@@ -22,6 +25,7 @@
 #include "advice.h"
 #include "connect.h"
 #include "parse-options.h"
+#include "transport.h"
 
 enum map_direction { FROM_SRC, FROM_DST };
 
@@ -32,10 +36,10 @@ struct counted_string {
 
 static int valid_remote(const struct remote *remote)
 {
-	return (!!remote->url) || (!!remote->foreign_vcs);
+	return !!remote->url.nr;
 }
 
-static const char *alias_url(const char *url, struct rewrites *r)
+static char *alias_url(const char *url, struct rewrites *r)
 {
 	int i, j;
 	struct counted_string *longest;
@@ -56,36 +60,43 @@ static const char *alias_url(const char *url, struct rewrites *r)
 		}
 	}
 	if (!longest)
-		return url;
+		return NULL;
 
 	return xstrfmt("%s%s", r->rewrite[longest_i]->base, url + longest->len);
 }
 
 static void add_url(struct remote *remote, const char *url)
 {
-	ALLOC_GROW(remote->url, remote->url_nr + 1, remote->url_alloc);
-	remote->url[remote->url_nr++] = url;
+	if (*url)
+		strvec_push(&remote->url, url);
+	else
+		strvec_clear(&remote->url);
 }
 
 static void add_pushurl(struct remote *remote, const char *pushurl)
 {
-	ALLOC_GROW(remote->pushurl, remote->pushurl_nr + 1, remote->pushurl_alloc);
-	remote->pushurl[remote->pushurl_nr++] = pushurl;
+	if (*pushurl)
+		strvec_push(&remote->pushurl, pushurl);
+	else
+		strvec_clear(&remote->pushurl);
 }
 
 static void add_pushurl_alias(struct remote_state *remote_state,
 			      struct remote *remote, const char *url)
 {
-	const char *pushurl = alias_url(url, &remote_state->rewrites_push);
-	if (pushurl != url)
-		add_pushurl(remote, pushurl);
+	char *alias = alias_url(url, &remote_state->rewrites_push);
+	if (alias)
+		add_pushurl(remote, alias);
+	free(alias);
 }
 
 static void add_url_alias(struct remote_state *remote_state,
 			  struct remote *remote, const char *url)
 {
-	add_url(remote, alias_url(url, &remote_state->rewrites));
+	char *alias = alias_url(url, &remote_state->rewrites);
+	add_url(remote, alias ? alias : url);
 	add_pushurl_alias(remote_state, remote, url);
+	free(alias);
 }
 
 struct remotes_hash_key {
@@ -134,6 +145,7 @@ static struct remote *make_remote(struct remote_state *remote_state,
 	ret->name = xstrndup(name, len);
 	refspec_init(&ret->push, REFSPEC_PUSH);
 	refspec_init(&ret->fetch, REFSPEC_FETCH);
+	string_list_init_dup(&ret->server_options);
 
 	ALLOC_GROW(remote_state->remotes, remote_state->remotes_nr + 1,
 		   remote_state->remotes_alloc);
@@ -147,22 +159,17 @@ static struct remote *make_remote(struct remote_state *remote_state,
 
 static void remote_clear(struct remote *remote)
 {
-	int i;
-
 	free((char *)remote->name);
 	free((char *)remote->foreign_vcs);
 
-	for (i = 0; i < remote->url_nr; i++)
-		free((char *)remote->url[i]);
-	FREE_AND_NULL(remote->url);
+	strvec_clear(&remote->url);
+	strvec_clear(&remote->pushurl);
 
-	for (i = 0; i < remote->pushurl_nr; i++)
-		free((char *)remote->pushurl[i]);
-	FREE_AND_NULL(remote->pushurl);
 	free((char *)remote->receivepack);
 	free((char *)remote->uploadpack);
 	FREE_AND_NULL(remote->http_proxy);
 	FREE_AND_NULL(remote->http_proxy_authmethod);
+	string_list_clear(&remote->server_options, 0);
 }
 
 static void add_merge(struct branch *branch, const char *name)
@@ -240,6 +247,17 @@ static struct branch *make_branch(struct remote_state *remote_state,
 	return ret;
 }
 
+static void branch_release(struct branch *branch)
+{
+	free((char *)branch->name);
+	free((char *)branch->refname);
+	free(branch->remote_name);
+	free(branch->pushremote_name);
+	for (int i = 0; i < branch->merge_nr; i++)
+		refspec_item_clear(branch->merge[i]);
+	free(branch->merge);
+}
+
 static struct rewrite *make_rewrite(struct rewrites *r,
 				    const char *base, size_t len)
 {
@@ -258,6 +276,14 @@ static struct rewrite *make_rewrite(struct rewrites *r,
 	ret->base = xstrndup(base, len);
 	ret->baselen = len;
 	return ret;
+}
+
+static void rewrites_release(struct rewrites *r)
+{
+	for (int i = 0; i < r->rewrite_nr; i++)
+		free((char *)r->rewrite[i]->base);
+	free(r->rewrite);
+	memset(r, 0, sizeof(*r));
 }
 
 static void add_instead_of(struct rewrite *rewrite, const char *instead_of)
@@ -292,7 +318,7 @@ static void read_remotes_file(struct remote_state *remote_state,
 
 		if (skip_prefix(buf.buf, "URL:", &v))
 			add_url_alias(remote_state, remote,
-				      xstrdup(skip_spaces(v)));
+				      skip_spaces(v));
 		else if (skip_prefix(buf.buf, "Push:", &v))
 			refspec_append(&remote->push, skip_spaces(v));
 		else if (skip_prefix(buf.buf, "Pull:", &v))
@@ -335,7 +361,7 @@ static void read_branches_file(struct remote_state *remote_state,
 	else
 		frag = to_free = repo_default_branch_name(the_repository, 0);
 
-	add_url_alias(remote_state, remote, strbuf_detach(&buf, NULL));
+	add_url_alias(remote_state, remote, buf.buf);
 	refspec_appendf(&remote->fetch, "refs/heads/%s:refs/heads/%s",
 			frag, remote->name);
 
@@ -346,6 +372,7 @@ static void read_branches_file(struct remote_state *remote_state,
 	refspec_appendf(&remote->push, "HEAD:refs/heads/%s", frag);
 	remote->fetch_tags = 1; /* always auto-follow */
 
+	strbuf_release(&buf);
 	free(to_free);
 }
 
@@ -369,8 +396,10 @@ static int handle_config(const char *key, const char *value,
 			return -1;
 		branch = make_branch(remote_state, name, namelen);
 		if (!strcmp(subkey, "remote")) {
+			FREE_AND_NULL(branch->remote_name);
 			return git_config_string(&branch->remote_name, key, value);
 		} else if (!strcmp(subkey, "pushremote")) {
+			FREE_AND_NULL(branch->pushremote_name);
 			return git_config_string(&branch->pushremote_name, key, value);
 		} else if (!strcmp(subkey, "merge")) {
 			if (!value)
@@ -402,9 +431,11 @@ static int handle_config(const char *key, const char *value,
 		return 0;
 
 	/* Handle remote.* variables */
-	if (!name && !strcmp(subkey, "pushdefault"))
+	if (!name && !strcmp(subkey, "pushdefault")) {
+		FREE_AND_NULL(remote_state->pushremote_name);
 		return git_config_string(&remote_state->pushremote_name, key,
 					 value);
+	}
 
 	if (!name)
 		return 0;
@@ -430,15 +461,13 @@ static int handle_config(const char *key, const char *value,
 	else if (!strcmp(subkey, "prunetags"))
 		remote->prune_tags = git_config_bool(key, value);
 	else if (!strcmp(subkey, "url")) {
-		char *v;
-		if (git_config_string(&v, key, value))
-			return -1;
-		add_url(remote, v);
+		if (!value)
+			return config_error_nonbool(key);
+		add_url(remote, value);
 	} else if (!strcmp(subkey, "pushurl")) {
-		char *v;
-		if (git_config_string(&v, key, value))
-			return -1;
-		add_pushurl(remote, v);
+		if (!value)
+			return config_error_nonbool(key);
+		add_pushurl(remote, value);
 	} else if (!strcmp(subkey, "push")) {
 		char *v;
 		if (git_config_string(&v, key, value))
@@ -473,13 +502,37 @@ static int handle_config(const char *key, const char *value,
 		else if (!strcmp(value, "--tags"))
 			remote->fetch_tags = 2;
 	} else if (!strcmp(subkey, "proxy")) {
+		FREE_AND_NULL(remote->http_proxy);
 		return git_config_string(&remote->http_proxy,
 					 key, value);
 	} else if (!strcmp(subkey, "proxyauthmethod")) {
+		FREE_AND_NULL(remote->http_proxy_authmethod);
 		return git_config_string(&remote->http_proxy_authmethod,
 					 key, value);
 	} else if (!strcmp(subkey, "vcs")) {
+		FREE_AND_NULL(remote->foreign_vcs);
 		return git_config_string(&remote->foreign_vcs, key, value);
+	} else if (!strcmp(subkey, "serveroption")) {
+		return parse_transport_option(key, value,
+					      &remote->server_options);
+	} else if (!strcmp(subkey, "followremotehead")) {
+		const char *no_warn_branch;
+		if (!strcmp(value, "never"))
+			remote->follow_remote_head = FOLLOW_REMOTE_NEVER;
+		else if (!strcmp(value, "create"))
+			remote->follow_remote_head = FOLLOW_REMOTE_CREATE;
+		else if (!strcmp(value, "warn")) {
+			remote->follow_remote_head = FOLLOW_REMOTE_WARN;
+			remote->no_warn_branch = NULL;
+		} else if (skip_prefix(value, "warn-if-not-", &no_warn_branch)) {
+			remote->follow_remote_head = FOLLOW_REMOTE_WARN;
+			remote->no_warn_branch = no_warn_branch;
+		} else if (!strcmp(value, "always")) {
+			remote->follow_remote_head = FOLLOW_REMOTE_ALWAYS;
+		} else {
+			warning(_("unrecognized followRemoteHEAD value '%s' ignored"),
+				value);
+		}
 	}
 	return 0;
 }
@@ -491,20 +544,27 @@ static void alias_all_urls(struct remote_state *remote_state)
 		int add_pushurl_aliases;
 		if (!remote_state->remotes[i])
 			continue;
-		for (j = 0; j < remote_state->remotes[i]->pushurl_nr; j++) {
-			remote_state->remotes[i]->pushurl[j] =
-				alias_url(remote_state->remotes[i]->pushurl[j],
-					  &remote_state->rewrites);
+		for (j = 0; j < remote_state->remotes[i]->pushurl.nr; j++) {
+			char *alias = alias_url(remote_state->remotes[i]->pushurl.v[j],
+						&remote_state->rewrites);
+			if (alias)
+				strvec_replace(&remote_state->remotes[i]->pushurl,
+					       j, alias);
+			free(alias);
 		}
-		add_pushurl_aliases = remote_state->remotes[i]->pushurl_nr == 0;
-		for (j = 0; j < remote_state->remotes[i]->url_nr; j++) {
+		add_pushurl_aliases = remote_state->remotes[i]->pushurl.nr == 0;
+		for (j = 0; j < remote_state->remotes[i]->url.nr; j++) {
+			char *alias;
 			if (add_pushurl_aliases)
 				add_pushurl_alias(
 					remote_state, remote_state->remotes[i],
-					remote_state->remotes[i]->url[j]);
-			remote_state->remotes[i]->url[j] =
-				alias_url(remote_state->remotes[i]->url[j],
+					remote_state->remotes[i]->url.v[j]);
+			alias = alias_url(remote_state->remotes[i]->url.v[j],
 					  &remote_state->rewrites);
+			if (alias)
+				strvec_replace(&remote_state->remotes[i]->url,
+					       j, alias);
+			free(alias);
 		}
 	}
 }
@@ -597,7 +657,7 @@ const char *pushremote_for_branch(struct branch *branch, int *explicit)
 static struct remote *remotes_remote_get(struct remote_state *remote_state,
 					 const char *name);
 
-const char *remote_ref_for_branch(struct branch *branch, int for_push)
+char *remote_ref_for_branch(struct branch *branch, int for_push)
 {
 	read_config(the_repository, 0);
 	die_on_missing_branch(the_repository, branch);
@@ -605,11 +665,11 @@ const char *remote_ref_for_branch(struct branch *branch, int for_push)
 	if (branch) {
 		if (!for_push) {
 			if (branch->merge_nr) {
-				return branch->merge_name[0];
+				return xstrdup(branch->merge_name[0]);
 			}
 		} else {
-			const char *dst,
-				*remote_name = remotes_pushremote_for_branch(
+			char *dst;
+			const char *remote_name = remotes_pushremote_for_branch(
 					the_repository->remote_state, branch,
 					NULL);
 			struct remote *remote = remotes_remote_get(
@@ -644,10 +704,10 @@ static void validate_remote_url(struct remote *remote)
 	else
 		die(_("unrecognized value transfer.credentialsInUrl: '%s'"), value);
 
-	for (i = 0; i < remote->url_nr; i++) {
+	for (i = 0; i < remote->url.nr; i++) {
 		struct url_info url_info = { 0 };
 
-		if (!url_normalize(remote->url[i], &url_info) ||
+		if (!url_normalize(remote->url.v[i], &url_info) ||
 		    !url_info.passwd_off)
 			goto loop_cleanup;
 
@@ -821,11 +881,30 @@ struct ref *ref_remove_duplicates(struct ref *ref_map)
 int remote_has_url(struct remote *remote, const char *url)
 {
 	int i;
-	for (i = 0; i < remote->url_nr; i++) {
-		if (!strcmp(remote->url[i], url))
+	for (i = 0; i < remote->url.nr; i++) {
+		if (!strcmp(remote->url.v[i], url))
 			return 1;
 	}
 	return 0;
+}
+
+struct strvec *push_url_of_remote(struct remote *remote)
+{
+	return remote->pushurl.nr ? &remote->pushurl : &remote->url;
+}
+
+void ref_push_report_free(struct ref_push_report *report)
+{
+	while (report) {
+		struct ref_push_report *next = report->next;
+
+		free(report->ref_name);
+		free(report->old_oid);
+		free(report->new_oid);
+		free(report);
+
+		report = next;
+	}
 }
 
 static int match_name_with_pattern(const char *key, const char *name,
@@ -1082,7 +1161,9 @@ void free_one_ref(struct ref *ref)
 	if (!ref)
 		return;
 	free_one_ref(ref->peer_ref);
+	ref_push_report_free(ref->report);
 	free(ref->remote_status);
+	free(ref->tracking_ref);
 	free(ref->symref);
 	free(ref);
 }
@@ -1164,7 +1245,7 @@ static void tail_link_ref(struct ref *ref, struct ref ***tail)
 static struct ref *alloc_delete_ref(void)
 {
 	struct ref *ref = alloc_ref("(delete)");
-	oidclr(&ref->new_oid);
+	oidclr(&ref->new_oid, the_repository->hash_algo);
 	return ref;
 }
 
@@ -1304,18 +1385,21 @@ static int match_explicit(struct ref *src, struct ref *dst,
 			  struct ref ***dst_tail,
 			  struct refspec_item *rs)
 {
-	struct ref *matched_src, *matched_dst;
-	int allocated_src;
+	struct ref *matched_src = NULL, *matched_dst = NULL;
+	int allocated_src = 0, ret;
 
 	const char *dst_value = rs->dst;
 	char *dst_guess;
 
-	if (rs->pattern || rs->matching || rs->negative)
-		return 0;
+	if (rs->pattern || rs->matching || rs->negative) {
+		ret = 0;
+		goto out;
+	}
 
-	matched_src = matched_dst = NULL;
-	if (match_explicit_lhs(src, rs, &matched_src, &allocated_src) < 0)
-		return -1;
+	if (match_explicit_lhs(src, rs, &matched_src, &allocated_src) < 0) {
+		ret = -1;
+		goto out;
+	}
 
 	if (!dst_value) {
 		int flag;
@@ -1354,18 +1438,30 @@ static int match_explicit(struct ref *src, struct ref *dst,
 		      dst_value);
 		break;
 	}
-	if (!matched_dst)
-		return -1;
-	if (matched_dst->peer_ref)
-		return error(_("dst ref %s receives from more than one src"),
-			     matched_dst->name);
-	else {
+
+	if (!matched_dst) {
+		ret = -1;
+		goto out;
+	}
+
+	if (matched_dst->peer_ref) {
+		ret = error(_("dst ref %s receives from more than one src"),
+			    matched_dst->name);
+		goto out;
+	} else {
 		matched_dst->peer_ref = allocated_src ?
 					matched_src :
 					copy_ref(matched_src);
 		matched_dst->force = rs->force;
+		matched_src = NULL;
 	}
-	return 0;
+
+	ret = 0;
+
+out:
+	if (allocated_src)
+		free_one_ref(matched_src);
+	return ret;
 }
 
 static int match_explicit_refs(struct ref *src, struct ref *dst,
@@ -1439,7 +1535,7 @@ static struct ref **tail_ref(struct ref **head)
 
 struct tips {
 	struct commit **tip;
-	int nr, alloc;
+	size_t nr, alloc;
 };
 
 static void add_to_tips(struct tips *tips, const struct object_id *oid)
@@ -1506,7 +1602,7 @@ static void add_missing_tags(struct ref *src, struct ref **dst, struct ref ***ds
 		const int reachable_flag = 1;
 		struct commit_list *found_commits;
 		struct commit **src_commits;
-		int nr_src_commits = 0, alloc_src_commits = 16;
+		size_t nr_src_commits = 0, alloc_src_commits = 16;
 		ALLOC_ARRAY(src_commits, alloc_src_commits);
 
 		for_each_string_list_item(item, &src_tag) {
@@ -2026,6 +2122,8 @@ static struct ref *get_expanded_map(const struct ref *remote_refs,
 		    !ignore_symref_update(expn_name, &scratch)) {
 			struct ref *cpy = copy_ref(ref);
 
+			if (cpy->peer_ref)
+				free_one_ref(cpy->peer_ref);
 			cpy->peer_ref = alloc_ref(expn_name);
 			if (refspec->force)
 				cpy->peer_ref->force = 1;
@@ -2342,7 +2440,7 @@ int format_tracking_info(struct branch *branch, struct strbuf *sb,
 	return 1;
 }
 
-static int one_local_ref(const char *refname, const struct object_id *oid,
+static int one_local_ref(const char *refname, const char *referent UNUSED, const struct object_id *oid,
 			 int flag UNUSED,
 			 void *cb_data)
 {
@@ -2427,7 +2525,7 @@ struct stale_heads_info {
 	struct refspec *rs;
 };
 
-static int get_stale_heads_cb(const char *refname, const struct object_id *oid,
+static int get_stale_heads_cb(const char *refname, const char *referent UNUSED, const struct object_id *oid,
 			      int flags, void *cb_data)
 {
 	struct stale_heads_info *info = cb_data;
@@ -2486,7 +2584,7 @@ struct ref *get_stale_heads(struct refspec *rs, struct ref *fetch_map)
 /*
  * Compare-and-swap
  */
-static void clear_cas_option(struct push_cas_option *cas)
+void clear_cas_option(struct push_cas_option *cas)
 {
 	int i;
 
@@ -2531,7 +2629,7 @@ static int parse_push_cas_option(struct push_cas_option *cas, const char *arg, i
 	if (!*colon)
 		entry->use_tracking = 1;
 	else if (!colon[1])
-		oidclr(&entry->expect);
+		oidclr(&entry->expect, the_repository->hash_algo);
 	else if (repo_get_oid(the_repository, colon + 1, &entry->expect))
 		return error(_("cannot parse expected object name '%s'"),
 			     colon + 1);
@@ -2563,8 +2661,10 @@ static int remote_tracking(struct remote *remote, const char *refname,
 	dst = apply_refspecs(&remote->fetch, refname);
 	if (!dst)
 		return -1; /* no tracking ref for refname at remote */
-	if (refs_read_ref(get_main_ref_store(the_repository), dst, oid))
+	if (refs_read_ref(get_main_ref_store(the_repository), dst, oid)) {
+		free(dst);
 		return -1; /* we know what the tracking ref is but we cannot read it */
+	}
 
 	*dst_refname = dst;
 	return 0;
@@ -2714,6 +2814,7 @@ static void check_if_includes_upstream(struct ref *remote)
 
 	if (is_reachable_in_reflog(local->name, remote) <= 0)
 		remote->unreachable = 1;
+	free_one_ref(local);
 }
 
 static void apply_cas(struct push_cas_option *cas,
@@ -2733,7 +2834,7 @@ static void apply_cas(struct push_cas_option *cas,
 		else if (remote_tracking(remote, ref->name,
 					 &ref->old_oid_expect,
 					 &ref->tracking_ref))
-			oidclr(&ref->old_oid_expect);
+			oidclr(&ref->old_oid_expect, the_repository->hash_algo);
 		else
 			ref->check_reachable = cas->use_force_if_includes;
 		return;
@@ -2747,7 +2848,7 @@ static void apply_cas(struct push_cas_option *cas,
 	if (remote_tracking(remote, ref->name,
 			    &ref->old_oid_expect,
 			    &ref->tracking_ref))
-		oidclr(&ref->old_oid_expect);
+		oidclr(&ref->old_oid_expect, the_repository->hash_algo);
 	else
 		ref->check_reachable = cas->use_force_if_includes;
 }
@@ -2772,9 +2873,9 @@ void apply_push_cas(struct push_cas_option *cas,
 
 struct remote_state *remote_state_new(void)
 {
-	struct remote_state *r = xmalloc(sizeof(*r));
+	struct remote_state *r;
 
-	memset(r, 0, sizeof(*r));
+	CALLOC_ARRAY(r, 1);
 
 	hashmap_init(&r->remotes_hash, remotes_hash_cmp, NULL, 0);
 	hashmap_init(&r->branches_hash, branches_hash_cmp, NULL, 0);
@@ -2783,16 +2884,26 @@ struct remote_state *remote_state_new(void)
 
 void remote_state_clear(struct remote_state *remote_state)
 {
+	struct hashmap_iter iter;
+	struct branch *b;
 	int i;
 
 	for (i = 0; i < remote_state->remotes_nr; i++)
 		remote_clear(remote_state->remotes[i]);
 	FREE_AND_NULL(remote_state->remotes);
+	FREE_AND_NULL(remote_state->pushremote_name);
 	remote_state->remotes_alloc = 0;
 	remote_state->remotes_nr = 0;
 
+	rewrites_release(&remote_state->rewrites);
+	rewrites_release(&remote_state->rewrites_push);
+
 	hashmap_clear_and_free(&remote_state->remotes_hash, struct remote, ent);
-	hashmap_clear_and_free(&remote_state->branches_hash, struct remote, ent);
+	hashmap_for_each_entry(&remote_state->branches_hash, &iter, b, ent) {
+		branch_release(b);
+		free(b);
+	}
+	hashmap_clear(&remote_state->branches_hash);
 }
 
 /*

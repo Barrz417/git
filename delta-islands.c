@@ -1,3 +1,6 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "git-compat-util.h"
 #include "object.h"
 #include "commit.h"
@@ -264,7 +267,8 @@ void resolve_tree_islands(struct repository *r,
 	QSORT(todo, nr, tree_depth_compare);
 
 	if (progress)
-		progress_state = start_progress(_("Propagating island marks"), nr);
+		progress_state = start_progress(the_repository,
+						_("Propagating island marks"), nr);
 
 	for (i = 0; i < nr; i++) {
 		struct object_entry *ent = todo[i].entry;
@@ -388,7 +392,7 @@ static void add_ref_to_island(kh_str_t *remote_islands, const char *island_name,
 	rl->hash += sha_core;
 }
 
-static int find_island_for_ref(const char *refname, const struct object_id *oid,
+static int find_island_for_ref(const char *refname, const char *referent UNUSED, const struct object_id *oid,
 			       int flags UNUSED, void *cb)
 {
 	struct island_load_data *ild = cb;

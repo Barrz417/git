@@ -4,6 +4,7 @@
 #
 
 test_description='Test the update hook infrastructure.'
+
 . ./test-lib.sh
 
 test_expect_success setup '

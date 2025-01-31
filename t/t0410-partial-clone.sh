@@ -5,8 +5,6 @@ test_description='partial clone'
 . ./test-lib.sh
 . "$TEST_DIRECTORY"/lib-terminal.sh
 
-# missing promisor objects cause repacks which write bitmaps to fail
-GIT_TEST_MULTI_PACK_INDEX_WRITE_BITMAP=0
 # When enabled, some commands will write commit-graphs. This causes fsck
 # to fail when delete_object() is called because fsck will attempt to
 # verify the out-of-sync commit graph.
@@ -242,7 +240,7 @@ test_expect_success 'fetching of missing objects works with ref-in-want enabled'
 	grep "fetch< fetch=.*ref-in-want" trace
 '
 
-test_expect_success 'fetching of missing objects from another promisor remote' '
+test_expect_success 'fetching from another promisor remote' '
 	git clone "file://$(pwd)/server" server2 &&
 	test_commit -C server2 bar &&
 	git -C server2 repack -a -d --write-bitmap-index &&
@@ -265,8 +263,8 @@ test_expect_success 'fetching of missing objects from another promisor remote' '
 	grep "$HASH2" out
 '
 
-test_expect_success 'fetching of missing objects configures a promisor remote' '
-	git clone "file://$(pwd)/server" server3 &&
+test_expect_success 'fetching with --filter configures a promisor remote' '
+	test_create_repo server3 &&
 	test_commit -C server3 baz &&
 	git -C server3 repack -a -d --write-bitmap-index &&
 	HASH3=$(git -C server3 rev-parse baz) &&

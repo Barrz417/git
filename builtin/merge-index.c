@@ -1,7 +1,9 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
 #include "hex.h"
 #include "read-cache-ll.h"
-#include "repository.h"
 #include "run-command.h"
 #include "sparse-index.h"
 
@@ -73,7 +75,13 @@ static void merge_all(void)
 	}
 }
 
-int cmd_merge_index(int argc, const char **argv, const char *prefix UNUSED)
+static const char usage_string[] =
+"git merge-index [-o] [-q] <merge-program> (-a | [--] [<filename>...])";
+
+int cmd_merge_index(int argc,
+		    const char **argv,
+		    const char *prefix UNUSED,
+		    struct repository *repo UNUSED)
 {
 	int i, force_file = 0;
 
@@ -82,8 +90,10 @@ int cmd_merge_index(int argc, const char **argv, const char *prefix UNUSED)
 	 */
 	signal(SIGCHLD, SIG_DFL);
 
+	show_usage_if_asked(argc, argv, usage_string);
+
 	if (argc < 3)
-		usage("git merge-index [-o] [-q] <merge-program> (-a | [--] [<filename>...])");
+		usage(usage_string);
 
 	repo_read_index(the_repository);
 

@@ -1,3 +1,6 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "builtin.h"
 #include "copy.h"
 #include "environment.h"
@@ -356,6 +359,7 @@ static int check_and_set_terms(struct bisect_terms *terms, const char *cmd)
 }
 
 static int inc_nr(const char *refname UNUSED,
+		  const char *referent UNUSED,
 		  const struct object_id *oid UNUSED,
 		  int flag UNUSED, void *cb_data)
 {
@@ -545,7 +549,7 @@ finish:
 	return res;
 }
 
-static int add_bisect_ref(const char *refname, const struct object_id *oid,
+static int add_bisect_ref(const char *refname, const char *referent UNUSED, const struct object_id *oid,
 			  int flags UNUSED, void *cb)
 {
 	struct add_bisect_ref_data *data = cb;
@@ -582,7 +586,7 @@ static int prepare_revs(struct bisect_terms *terms, struct rev_info *revs)
 	refs_for_each_glob_ref_in(get_main_ref_store(the_repository),
 				  add_bisect_ref, good, "refs/bisect/", &cb);
 	if (prepare_revision_walk(revs))
-		res = error(_("revision walk setup failed\n"));
+		res = error(_("revision walk setup failed"));
 
 	free(good);
 	free(bad);
@@ -1107,7 +1111,7 @@ static enum bisect_error bisect_skip(struct bisect_terms *terms, int argc,
 			setup_revisions(2, argv + i - 1, &revs, NULL);
 
 			if (prepare_revision_walk(&revs))
-				die(_("revision walk setup failed\n"));
+				die(_("revision walk setup failed"));
 			while ((commit = get_revision(&revs)) != NULL)
 				strvec_push(&argv_state,
 						oid_to_hex(&commit->object.oid));
@@ -1162,6 +1166,7 @@ static int bisect_visualize(struct bisect_terms *terms, int argc,
 }
 
 static int get_first_good(const char *refname UNUSED,
+			  const char *referent UNUSED,
 			  const struct object_id *oid,
 			  int flag UNUSED, void *cb_data)
 {
@@ -1309,7 +1314,8 @@ static int bisect_run(struct bisect_terms *terms, int argc, const char **argv)
 	return res;
 }
 
-static int cmd_bisect__reset(int argc, const char **argv, const char *prefix UNUSED)
+static int cmd_bisect__reset(int argc, const char **argv, const char *prefix UNUSED,
+			     struct repository *repo UNUSED)
 {
 	if (argc > 1)
 		return error(_("'%s' requires either no argument or a commit"),
@@ -1317,7 +1323,8 @@ static int cmd_bisect__reset(int argc, const char **argv, const char *prefix UNU
 	return bisect_reset(argc ? argv[0] : NULL);
 }
 
-static int cmd_bisect__terms(int argc, const char **argv, const char *prefix UNUSED)
+static int cmd_bisect__terms(int argc, const char **argv, const char *prefix UNUSED,
+			     struct repository *repo UNUSED)
 {
 	int res;
 	struct bisect_terms terms = { 0 };
@@ -1330,7 +1337,8 @@ static int cmd_bisect__terms(int argc, const char **argv, const char *prefix UNU
 	return res;
 }
 
-static int cmd_bisect__start(int argc, const char **argv, const char *prefix UNUSED)
+static int cmd_bisect__start(int argc, const char **argv, const char *prefix UNUSED,
+			     struct repository *repo UNUSED)
 {
 	int res;
 	struct bisect_terms terms = { 0 };
@@ -1341,7 +1349,8 @@ static int cmd_bisect__start(int argc, const char **argv, const char *prefix UNU
 	return res;
 }
 
-static int cmd_bisect__next(int argc, const char **argv UNUSED, const char *prefix)
+static int cmd_bisect__next(int argc, const char **argv UNUSED, const char *prefix,
+			    struct repository *repo UNUSED)
 {
 	int res;
 	struct bisect_terms terms = { 0 };
@@ -1355,12 +1364,15 @@ static int cmd_bisect__next(int argc, const char **argv UNUSED, const char *pref
 	return res;
 }
 
-static int cmd_bisect__log(int argc UNUSED, const char **argv UNUSED, const char *prefix UNUSED)
+static int cmd_bisect__log(int argc UNUSED, const char **argv UNUSED,
+			   const char *prefix UNUSED,
+			   struct repository *repo UNUSED)
 {
 	return bisect_log();
 }
 
-static int cmd_bisect__replay(int argc, const char **argv, const char *prefix UNUSED)
+static int cmd_bisect__replay(int argc, const char **argv, const char *prefix UNUSED,
+			      struct repository *repo UNUSED)
 {
 	int res;
 	struct bisect_terms terms = { 0 };
@@ -1373,7 +1385,8 @@ static int cmd_bisect__replay(int argc, const char **argv, const char *prefix UN
 	return res;
 }
 
-static int cmd_bisect__skip(int argc, const char **argv, const char *prefix UNUSED)
+static int cmd_bisect__skip(int argc, const char **argv, const char *prefix UNUSED,
+			    struct repository *repo UNUSED)
 {
 	int res;
 	struct bisect_terms terms = { 0 };
@@ -1385,7 +1398,8 @@ static int cmd_bisect__skip(int argc, const char **argv, const char *prefix UNUS
 	return res;
 }
 
-static int cmd_bisect__visualize(int argc, const char **argv, const char *prefix UNUSED)
+static int cmd_bisect__visualize(int argc, const char **argv, const char *prefix UNUSED,
+				 struct repository *repo UNUSED)
 {
 	int res;
 	struct bisect_terms terms = { 0 };
@@ -1396,7 +1410,8 @@ static int cmd_bisect__visualize(int argc, const char **argv, const char *prefix
 	return res;
 }
 
-static int cmd_bisect__run(int argc, const char **argv, const char *prefix UNUSED)
+static int cmd_bisect__run(int argc, const char **argv, const char *prefix UNUSED,
+			   struct repository *repo UNUSED)
 {
 	int res;
 	struct bisect_terms terms = { 0 };
@@ -1409,7 +1424,10 @@ static int cmd_bisect__run(int argc, const char **argv, const char *prefix UNUSE
 	return res;
 }
 
-int cmd_bisect(int argc, const char **argv, const char *prefix)
+int cmd_bisect(int argc,
+	       const char **argv,
+	       const char *prefix,
+	       struct repository *repo)
 {
 	int res = 0;
 	parse_opt_subcommand_fn *fn = NULL;
@@ -1445,7 +1463,7 @@ int cmd_bisect(int argc, const char **argv, const char *prefix)
 	} else {
 		argc--;
 		argv++;
-		res = fn(argc, argv, prefix);
+		res = fn(argc, argv, prefix, repo);
 	}
 
 	return is_bisect_success(res) ? 0 : -res;

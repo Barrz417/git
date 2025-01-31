@@ -1,3 +1,5 @@
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "test-lib.h"
 #include "trailer.h"
 
@@ -308,7 +310,7 @@ static void run_t_trailer_iterator(void)
 	}
 }
 
-int cmd_main(int argc, const char **argv)
+int cmd_main(int argc UNUSED, const char **argv UNUSED)
 {
 	run_t_trailer_iterator();
 	return test_done();

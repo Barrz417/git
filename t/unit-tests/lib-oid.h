@@ -1,7 +1,7 @@
 #ifndef LIB_OID_H
 #define LIB_OID_H
 
-#include "hash-ll.h"
+#include "hash.h"
 
 /*
  * Convert arbitrary hex string to object_id.
@@ -13,5 +13,13 @@
  * environment variable.
  */
 int get_oid_arbitrary_hex(const char *s, struct object_id *oid);
+/*
+ * Returns one of GIT_HASH_{SHA1, SHA256, UNKNOWN} based on the value of
+ * GIT_TEST_DEFAULT_HASH environment variable. The fallback value in the
+ * absence of GIT_TEST_DEFAULT_HASH is GIT_HASH_SHA1. It also uses
+ * check(algo != GIT_HASH_UNKNOWN) before returning to verify if the
+ * GIT_TEST_DEFAULT_HASH's value is valid or not.
+ */
+int init_hash_algo(void);
 
 #endif /* LIB_OID_H */

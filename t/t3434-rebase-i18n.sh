@@ -19,6 +19,12 @@ export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
 . ./test-lib.sh
 
+if ! test_have_prereq ICONV
+then
+	skip_all='skipping rebase i18n tests; iconv not available'
+	test_done
+fi
+
 compare_msg () {
 	iconv -f "$2" -t "$3" "$TEST_DIRECTORY/t3434/$1" >expect &&
 	git cat-file commit HEAD >raw &&

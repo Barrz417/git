@@ -292,6 +292,8 @@ test_expect_success 'ls-remote with filtered symref (refname)' '
 	cat >expect <<-EOF &&
 	ref: refs/heads/main	HEAD
 	$rev	HEAD
+	ref: refs/remotes/origin/main	refs/remotes/origin/HEAD
+	$rev	refs/remotes/origin/HEAD
 	EOF
 	git ls-remote --symref . HEAD >actual &&
 	test_cmp expect actual
@@ -400,6 +402,20 @@ test_expect_success 'v0 clients can handle multiple symrefs' '
 
 	git ls-remote --symref --upload-pack=./cat-input . >actual &&
 	test_cmp expect actual
+'
+
+test_expect_success 'helper with refspec capability fails gracefully' '
+	mkdir test-bin &&
+	write_script test-bin/git-remote-foo <<-EOF &&
+	read capabilities
+	echo import
+	echo refspec ${SQ}*:*${SQ}
+	EOF
+	(
+		PATH="$PWD/test-bin:$PATH" &&
+		export PATH &&
+		test_must_fail nongit git ls-remote foo::bar
+	)
 '
 
 test_done

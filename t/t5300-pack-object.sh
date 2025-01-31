@@ -3,9 +3,8 @@
 # Copyright (c) 2005 Junio C Hamano
 #
 
-test_description='git pack-object
+test_description='git pack-object'
 
-'
 . ./test-lib.sh
 
 test_expect_success 'setup' '
@@ -153,6 +152,11 @@ check_deltas() {
 test_expect_success 'pack without delta' '
 	packname_1=$(git pack-objects --progress --window=0 test-1 \
 			<obj-list 2>stderr) &&
+	check_deltas stderr = 0
+'
+
+test_expect_success 'negative window clamps to 0' '
+	git pack-objects --progress --window=-1 neg-window <obj-list 2>stderr &&
 	check_deltas stderr = 0
 '
 
@@ -327,10 +331,8 @@ test_expect_success 'build pack index for an existing pack' '
 	git index-pack -o tmp.idx test-3.pack &&
 	cmp tmp.idx test-1-${packname_1}.idx &&
 
-	git index-pack --promisor=message test-3.pack &&
+	git index-pack test-3.pack &&
 	cmp test-3.idx test-1-${packname_1}.idx &&
-	echo message >expect &&
-	test_cmp expect test-3.promisor &&
 
 	cat test-2-${packname_2}.pack >test-3.pack &&
 	git index-pack -o tmp.idx test-2-${packname_2}.pack &&
@@ -523,6 +525,24 @@ test_expect_success 'index-pack --strict <pack> works in non-repo' '
 	test_path_is_file foo.idx
 '
 
+test_expect_success SHA1 'show-index works OK outside a repository' '
+	nongit git show-index <foo.idx
+'
+
+for hash in sha1 sha256
+do
+	test_expect_success 'show-index works OK outside a repository with hash algo passed in via --object-format' '
+		test_when_finished "rm -rf explicit-hash-$hash" &&
+		git init --object-format=$hash explicit-hash-$hash &&
+		test_commit -C explicit-hash-$hash one &&
+		git -C explicit-hash-$hash rev-parse one >in &&
+		git -C explicit-hash-$hash pack-objects explicit-hash-$hash <in &&
+		idx=$(echo explicit-hash-$hash/explicit-hash-$hash*.idx) &&
+		nongit git show-index --object-format=$hash <"$idx" >actual &&
+		test_line_count = 1 actual
+	'
+done
+
 test_expect_success !PTHREADS,!FAIL_PREREQS \
 	'index-pack --threads=N or pack.threads=N warns when no pthreads' '
 	test_must_fail git index-pack --threads=2 2>err &&
@@ -630,9 +650,43 @@ test_expect_success 'prefetch objects' '
 	test_line_count = 1 donelines
 '
 
-test_expect_success 'negative window clamps to 0' '
-	git pack-objects --progress --window=-1 neg-window <obj-list 2>stderr &&
-	check_deltas stderr = 0
-'
+for hash in sha1 sha256
+do
+	test_expect_success "verify-pack with $hash packfile" '
+		test_when_finished "rm -rf repo" &&
+		git init --object-format=$hash repo &&
+		test_commit -C repo initial &&
+		git -C repo repack -ad &&
+		git -C repo verify-pack "$(pwd)"/repo/.git/objects/pack/*.idx &&
+		if test $hash = sha1
+		then
+			nongit git verify-pack "$(pwd)"/repo/.git/objects/pack/*.idx
+		else
+			# We have no way to identify the hash used by packfiles
+			# or indices, so we always fall back to SHA1.
+			nongit test_must_fail git verify-pack "$(pwd)"/repo/.git/objects/pack/*.idx &&
+			# But with an explicit object format we should succeed.
+			nongit git verify-pack --object-format=$hash "$(pwd)"/repo/.git/objects/pack/*.idx
+		fi
+	'
+
+	test_expect_success "index-pack outside of a $hash repository" '
+		test_when_finished "rm -rf repo" &&
+		git init --object-format=$hash repo &&
+		test_commit -C repo initial &&
+		git -C repo repack -ad &&
+		git -C repo index-pack --verify "$(pwd)"/repo/.git/objects/pack/*.pack &&
+		if test $hash = sha1
+		then
+			nongit git index-pack --verify "$(pwd)"/repo/.git/objects/pack/*.pack
+		else
+			# We have no way to identify the hash used by packfiles
+			# or indices, so we always fall back to SHA1.
+			nongit test_must_fail git index-pack --verify "$(pwd)"/repo/.git/objects/pack/*.pack 2>err &&
+			# But with an explicit object format we should succeed.
+			nongit git index-pack --object-format=$hash --verify "$(pwd)"/repo/.git/objects/pack/*.pack
+		fi
+	'
+done
 
 test_done

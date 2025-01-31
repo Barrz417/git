@@ -1,3 +1,5 @@
+#define USE_THE_REPOSITORY_VARIABLE
+
 #include "git-compat-util.h"
 #include "transport.h"
 #include "quote.h"
@@ -87,11 +89,18 @@ static int recvline(struct helper_data *helper, struct strbuf *buffer)
 	return recvline_fh(helper->out, buffer);
 }
 
-static void write_constant(int fd, const char *str)
+static int write_constant_gently(int fd, const char *str)
 {
 	if (debug)
 		fprintf(stderr, "Debug: Remote helper: -> %s", str);
 	if (write_in_full(fd, str, strlen(str)) < 0)
+		return -1;
+	return 0;
+}
+
+static void write_constant(int fd, const char *str)
+{
+	if (write_constant_gently(fd, str) < 0)
 		die_errno(_("full write to remote helper failed"));
 }
 
@@ -141,7 +150,7 @@ static struct child_process *get_helper(struct transport *transport)
 
 	if (have_git_dir())
 		strvec_pushf(&helper->env, "%s=%s",
-			     GIT_DIR_ENVIRONMENT, get_git_dir());
+			     GIT_DIR_ENVIRONMENT, repo_get_git_dir(the_repository));
 
 	helper->trace2_child_class = helper->args.v[0]; /* "remote-<name>" */
 
@@ -166,13 +175,16 @@ static struct child_process *get_helper(struct transport *transport)
 		die_errno(_("can't dup helper output fd"));
 	data->out = xfdopen(duped, "r");
 
-	write_constant(helper->in, "capabilities\n");
+	sigchain_push(SIGPIPE, SIG_IGN);
+	if (write_constant_gently(helper->in, "capabilities\n") < 0)
+		die("remote helper '%s' aborted session", data->name);
+	sigchain_pop(SIGPIPE);
 
 	while (1) {
 		const char *capname, *arg;
 		int mandatory = 0;
 		if (recvline(data, &buf))
-			exit(128);
+			die("remote helper '%s' aborted session", data->name);
 
 		if (!*buf.buf)
 			break;
@@ -301,9 +313,9 @@ static int string_list_set_helper_option(struct helper_data *data,
 					 struct string_list *list)
 {
 	struct strbuf buf = STRBUF_INIT;
-	int i, ret = 0;
+	int ret = 0;
 
-	for (i = 0; i < list->nr; i++) {
+	for (size_t i = 0; i < list->nr; i++) {
 		strbuf_addf(&buf, "option %s ", name);
 		quote_c_style(list->items[i].string, &buf, NULL, 0);
 		strbuf_addch(&buf, '\n');
@@ -321,7 +333,7 @@ static int set_helper_option(struct transport *transport,
 {
 	struct helper_data *data = transport->data;
 	struct strbuf buf = STRBUF_INIT;
-	int i, ret, is_bool = 0;
+	int ret, is_bool = 0;
 
 	get_helper(transport);
 
@@ -332,12 +344,12 @@ static int set_helper_option(struct transport *transport,
 		return string_list_set_helper_option(data, name,
 						     (struct string_list *)value);
 
-	for (i = 0; i < ARRAY_SIZE(unsupported_options); i++) {
+	for (size_t i = 0; i < ARRAY_SIZE(unsupported_options); i++) {
 		if (!strcmp(name, unsupported_options[i]))
 			return 1;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(boolean_options); i++) {
+	for (size_t i = 0; i < ARRAY_SIZE(boolean_options); i++) {
 		if (!strcmp(name, boolean_options[i])) {
 			is_bool = 1;
 			break;
@@ -387,6 +399,8 @@ static int release_helper(struct transport *transport)
 	int res = 0;
 	struct helper_data *data = transport->data;
 	refspec_clear(&data->rs);
+	free(data->import_marks);
+	free(data->export_marks);
 	res = disconnect_helper(transport);
 	free(transport->data);
 	return res;
@@ -467,7 +481,6 @@ static int get_exporter(struct transport *transport,
 {
 	struct helper_data *data = transport->data;
 	struct child_process *helper = get_helper(transport);
-	int i;
 
 	child_process_init(fastexport);
 
@@ -483,7 +496,7 @@ static int get_exporter(struct transport *transport,
 	if (data->import_marks)
 		strvec_pushf(&fastexport->args, "--import-marks=%s", data->import_marks);
 
-	for (i = 0; i < revlist_args->nr; i++)
+	for (size_t i = 0; i < revlist_args->nr; i++)
 		strvec_push(&fastexport->args, revlist_args->items[i].string);
 
 	fastexport->git_cmd = 1;
@@ -705,8 +718,14 @@ static int fetch_refs(struct transport *transport,
 		return -1;
 	}
 
-	if (!data->get_refs_list_called)
-		get_refs_list_using_list(transport, 0);
+	if (!data->get_refs_list_called) {
+		/*
+		 * We do not care about the list of refs returned, but only
+		 * that the "list" command was sent.
+		 */
+		struct ref *dummy = get_refs_list_using_list(transport, 0);
+		free_refs(dummy);
+	}
 
 	count = 0;
 	for (i = 0; i < nr_heads; i++)
@@ -1011,6 +1030,7 @@ static int push_refs_with_push(struct transport *transport,
 			if (atomic) {
 				reject_atomic_push(remote_refs, mirror);
 				string_list_clear(&cas_options, 0);
+				strbuf_release(&buf);
 				return 0;
 			} else
 				continue;

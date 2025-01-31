@@ -1,3 +1,5 @@
+#define USE_THE_REPOSITORY_VARIABLE
+
 #include "builtin.h"
 #include "abspath.h"
 #include "config.h"
@@ -19,6 +21,7 @@
 #include "entry.h"
 #include "preload-index.h"
 #include "read-cache.h"
+#include "repository.h"
 #include "rerere.h"
 #include "revision.h"
 #include "setup.h"
@@ -247,7 +250,8 @@ static int do_clear_stash(void)
 			       ref_stash, &obj, 0);
 }
 
-static int clear_stash(int argc, const char **argv, const char *prefix)
+static int clear_stash(int argc, const char **argv, const char *prefix,
+		       struct repository *repo UNUSED)
 {
 	struct option options[] = {
 		OPT_END()
@@ -484,7 +488,7 @@ static void unstage_changes_unless_new(struct object_id *orig_tree)
 					 "         to make room.\n"),
 				       ce->name, new_path.buf);
 				if (rename(ce->name, new_path.buf))
-					die("Failed to move %s to %s\n",
+					die("Failed to move %s to %s",
 					    ce->name, new_path.buf);
 				strbuf_release(&new_path);
 			}
@@ -539,8 +543,8 @@ static int do_apply_stash(const char *prefix, struct stash_info *info,
 					 NULL, NULL, NULL))
 		return error(_("could not write index"));
 
-	if (write_index_as_tree(&c_tree, the_repository->index, get_index_file(), 0,
-				NULL))
+	if (write_index_as_tree(&c_tree, the_repository->index,
+				repo_get_index_file(the_repository), 0, NULL))
 		return error(_("cannot apply a stash in the middle of a merge"));
 
 	if (index) {
@@ -565,7 +569,7 @@ static int do_apply_stash(const char *prefix, struct stash_info *info,
 			discard_index(the_repository->index);
 			repo_read_index(the_repository);
 			if (write_index_as_tree(&index_tree, the_repository->index,
-						get_index_file(), 0, NULL))
+						repo_get_index_file(the_repository), 0, NULL))
 				return error(_("could not save index tree"));
 
 			reset_head();
@@ -574,7 +578,7 @@ static int do_apply_stash(const char *prefix, struct stash_info *info,
 		}
 	}
 
-	init_merge_options(&o, the_repository);
+	init_ui_merge_options(&o, the_repository);
 
 	o.branch1 = "Updated upstream";
 	o.branch2 = "Stashed changes";
@@ -640,9 +644,9 @@ restore_untracked:
 		cp.git_cmd = 1;
 		cp.dir = prefix;
 		strvec_pushf(&cp.env, GIT_WORK_TREE_ENVIRONMENT"=%s",
-			     absolute_path(get_git_work_tree()));
+			     absolute_path(repo_get_work_tree(the_repository)));
 		strvec_pushf(&cp.env, GIT_DIR_ENVIRONMENT"=%s",
-			     absolute_path(get_git_dir()));
+			     absolute_path(repo_get_git_dir(the_repository)));
 		strvec_push(&cp.args, "status");
 		run_command(&cp);
 	}
@@ -650,7 +654,8 @@ restore_untracked:
 	return ret;
 }
 
-static int apply_stash(int argc, const char **argv, const char *prefix)
+static int apply_stash(int argc, const char **argv, const char *prefix,
+		       struct repository *repo UNUSED)
 {
 	int ret = -1;
 	int quiet = 0;
@@ -724,7 +729,8 @@ static int get_stash_info_assert(struct stash_info *info, int argc,
 	return 0;
 }
 
-static int drop_stash(int argc, const char **argv, const char *prefix)
+static int drop_stash(int argc, const char **argv, const char *prefix,
+		      struct repository *repo UNUSED)
 {
 	int ret = -1;
 	int quiet = 0;
@@ -746,7 +752,8 @@ cleanup:
 	return ret;
 }
 
-static int pop_stash(int argc, const char **argv, const char *prefix)
+static int pop_stash(int argc, const char **argv, const char *prefix,
+		     struct repository *repo UNUSED)
 {
 	int ret = -1;
 	int index = 0;
@@ -776,7 +783,8 @@ cleanup:
 	return ret;
 }
 
-static int branch_stash(int argc, const char **argv, const char *prefix)
+static int branch_stash(int argc, const char **argv, const char *prefix,
+			struct repository *repo UNUSED)
 {
 	int ret = -1;
 	const char *branch = NULL;
@@ -814,7 +822,8 @@ cleanup:
 	return ret;
 }
 
-static int list_stash(int argc, const char **argv, const char *prefix)
+static int list_stash(int argc, const char **argv, const char *prefix,
+		      struct repository *repo UNUSED)
 {
 	struct child_process cp = CHILD_PROCESS_INIT;
 	struct option options[] = {
@@ -865,9 +874,8 @@ static void diff_include_untracked(const struct stash_info *info, struct diff_op
 	struct tree *tree[ARRAY_SIZE(oid)];
 	struct tree_desc tree_desc[ARRAY_SIZE(oid)];
 	struct unpack_trees_options unpack_tree_opt = { 0 };
-	int i;
 
-	for (i = 0; i < ARRAY_SIZE(oid); i++) {
+	for (size_t i = 0; i < ARRAY_SIZE(oid); i++) {
 		tree[i] = parse_tree_indirect(oid[i]);
 		if (parse_tree(tree[i]) < 0)
 			die(_("failed to parse tree"));
@@ -887,7 +895,8 @@ static void diff_include_untracked(const struct stash_info *info, struct diff_op
 	do_diff_cache(&info->b_commit, diff_opt);
 }
 
-static int show_stash(int argc, const char **argv, const char *prefix)
+static int show_stash(int argc, const char **argv, const char *prefix,
+		      struct repository *repo UNUSED)
 {
 	int i;
 	int ret = -1;
@@ -974,8 +983,10 @@ static int show_stash(int argc, const char **argv, const char *prefix)
 	}
 	log_tree_diff_flush(&rev);
 
-	ret = diff_result_code(&rev.diffopt);
+	ret = diff_result_code(&rev);
+
 cleanup:
+	strvec_clear(&revision_args);
 	strvec_clear(&stash_args);
 	free_stash_info(&info);
 	release_revisions(&rev);
@@ -1013,18 +1024,20 @@ static int do_store_stash(const struct object_id *w_commit, const char *stash_ms
 	return 0;
 }
 
-static int store_stash(int argc, const char **argv, const char *prefix)
+static int store_stash(int argc, const char **argv, const char *prefix,
+		       struct repository *repo UNUSED)
 {
 	int quiet = 0;
 	const char *stash_msg = NULL;
 	struct object_id obj;
-	struct object_context dummy;
+	struct object_context dummy = {0};
 	struct option options[] = {
 		OPT__QUIET(&quiet, N_("be quiet")),
 		OPT_STRING('m', "message", &stash_msg, "message",
 			   N_("stash message")),
 		OPT_END()
 	};
+	int ret;
 
 	argc = parse_options(argc, argv, prefix, options,
 			     git_stash_store_usage,
@@ -1043,10 +1056,15 @@ static int store_stash(int argc, const char **argv, const char *prefix)
 		if (!quiet)
 			fprintf_ln(stderr, _("Cannot update %s with %s"),
 					     ref_stash, argv[0]);
-		return -1;
+		ret = -1;
+		goto out;
 	}
 
-	return do_store_stash(&obj, stash_msg, quiet);
+	ret = do_store_stash(&obj, stash_msg, quiet);
+
+out:
+	object_context_release(&dummy);
+	return ret;
 }
 
 static void add_pathspecs(struct strvec *args,
@@ -1118,13 +1136,13 @@ static int check_changes_tracked_files(const struct pathspec *ps)
 	diff_setup_done(&rev.diffopt);
 
 	run_diff_index(&rev, DIFF_INDEX_CACHED);
-	if (diff_result_code(&rev.diffopt)) {
+	if (diff_result_code(&rev)) {
 		ret = 1;
 		goto done;
 	}
 
 	run_diff_files(&rev, 0);
-	if (diff_result_code(&rev.diffopt)) {
+	if (diff_result_code(&rev)) {
 		ret = 1;
 		goto done;
 	}
@@ -1397,8 +1415,8 @@ static int do_create_stash(const struct pathspec *ps, struct strbuf *stash_msg_b
 
 	strbuf_addf(&commit_tree_label, "index on %s\n", msg.buf);
 	commit_list_insert(head_commit, &parents);
-	if (write_index_as_tree(&info->i_tree, the_repository->index, get_index_file(), 0,
-				NULL) ||
+	if (write_index_as_tree(&info->i_tree, the_repository->index,
+				repo_get_index_file(the_repository), 0, NULL) ||
 	    commit_tree(commit_tree_label.buf, commit_tree_label.len,
 			&info->i_tree, parents, &info->i_commit, NULL, NULL)) {
 		if (!quiet)
@@ -1407,6 +1425,9 @@ static int do_create_stash(const struct pathspec *ps, struct strbuf *stash_msg_b
 		ret = -1;
 		goto done;
 	}
+
+	free_commit_list(parents);
+	parents = NULL;
 
 	if (include_untracked) {
 		if (save_untracked_files(info, &msg, untracked_files)) {
@@ -1453,11 +1474,6 @@ static int do_create_stash(const struct pathspec *ps, struct strbuf *stash_msg_b
 	else
 		strbuf_insertf(stash_msg_buf, 0, "On %s: ", branch_name);
 
-	/*
-	 * `parents` will be empty after calling `commit_tree()`, so there is
-	 * no need to call `free_commit_list()`
-	 */
-	parents = NULL;
 	if (untracked_commit_option)
 		commit_list_insert(lookup_commit(the_repository,
 						 &info->u_commit),
@@ -1479,10 +1495,12 @@ done:
 	strbuf_release(&commit_tree_label);
 	strbuf_release(&msg);
 	strbuf_release(&untracked_files);
+	free_commit_list(parents);
 	return ret;
 }
 
-static int create_stash(int argc, const char **argv, const char *prefix UNUSED)
+static int create_stash(int argc, const char **argv, const char *prefix UNUSED,
+			struct repository *repo UNUSED)
 {
 	int ret;
 	struct strbuf stash_msg_buf = STRBUF_INIT;
@@ -1514,6 +1532,7 @@ static int do_push_stash(const struct pathspec *ps, const char *stash_msg, int q
 	struct strbuf patch = STRBUF_INIT;
 	struct strbuf stash_msg_buf = STRBUF_INIT;
 	struct strbuf untracked_files = STRBUF_INIT;
+	struct strbuf out = STRBUF_INIT;
 
 	if (patch_mode && keep_index == -1)
 		keep_index = 1;
@@ -1538,12 +1557,11 @@ static int do_push_stash(const struct pathspec *ps, const char *stash_msg, int q
 
 	repo_read_index_preload(the_repository, NULL, 0);
 	if (!include_untracked && ps->nr) {
-		int i;
 		char *ps_matched = xcalloc(ps->nr, 1);
 
 		/* TODO: audit for interaction with sparse-index. */
 		ensure_full_index(the_repository->index);
-		for (i = 0; i < the_repository->index->cache_nr; i++)
+		for (size_t i = 0; i < the_repository->index->cache_nr; i++)
 			ce_path_match(the_repository->index, the_repository->index->cache[i], ps,
 				      ps_matched);
 
@@ -1619,7 +1637,6 @@ static int do_push_stash(const struct pathspec *ps, const char *stash_msg, int q
 			struct child_process cp_add = CHILD_PROCESS_INIT;
 			struct child_process cp_diff = CHILD_PROCESS_INIT;
 			struct child_process cp_apply = CHILD_PROCESS_INIT;
-			struct strbuf out = STRBUF_INIT;
 
 			cp_add.git_cmd = 1;
 			strvec_push(&cp_add.args, "add");
@@ -1664,7 +1681,28 @@ static int do_push_stash(const struct pathspec *ps, const char *stash_msg, int q
 			}
 		}
 
-		if (keep_index == 1 && !is_null_oid(&info.i_tree)) {
+		/*
+		 * When keeping staged entries, we need to reset the working
+		 * directory to match the state of our index. This can be
+		 * skipped when the index is the empty tree, because there is
+		 * nothing to reset in that case:
+		 *
+		 *   - When the index has any file, regardless of whether
+		 *     staged or not, the tree cannot be empty by definition
+		 *     and thus we enter the condition.
+		 *
+		 *   - When the index has no files, the only thing we need to
+		 *     care about is untracked files when `--include-untracked`
+		 *     is given. But as we already execute git-clean(1) further
+		 *     up to delete such untracked files we don't have to do
+		 *     anything here, either.
+		 *
+		 * We thus skip calling git-checkout(1) in this case, also
+		 * because running it on an empty tree will cause it to fail
+		 * due to the pathspec not matching anything.
+		 */
+		if (keep_index == 1 && !is_null_oid(&info.i_tree) &&
+		    !is_empty_tree_oid(&info.i_tree, the_repository->hash_algo)) {
 			struct child_process cp = CHILD_PROCESS_INIT;
 
 			cp.git_cmd = 1;
@@ -1711,6 +1749,7 @@ static int do_push_stash(const struct pathspec *ps, const char *stash_msg, int q
 
 done:
 	strbuf_release(&patch);
+	strbuf_release(&out);
 	free_stash_info(&info);
 	strbuf_release(&stash_msg_buf);
 	strbuf_release(&untracked_files);
@@ -1728,7 +1767,7 @@ static int push_stash(int argc, const char **argv, const char *prefix,
 	int quiet = 0;
 	int pathspec_file_nul = 0;
 	const char *stash_msg = NULL;
-	const char *pathspec_from_file = NULL;
+	char *pathspec_from_file = NULL;
 	struct pathspec ps;
 	struct option options[] = {
 		OPT_BOOL('k', "keep-index", &keep_index,
@@ -1790,16 +1829,20 @@ static int push_stash(int argc, const char **argv, const char *prefix,
 
 	ret = do_push_stash(&ps, stash_msg, quiet, keep_index, patch_mode,
 			    include_untracked, only_staged);
+
 	clear_pathspec(&ps);
+	free(pathspec_from_file);
 	return ret;
 }
 
-static int push_stash_unassumed(int argc, const char **argv, const char *prefix)
+static int push_stash_unassumed(int argc, const char **argv, const char *prefix,
+				struct repository *repo UNUSED)
 {
 	return push_stash(argc, argv, prefix, 0);
 }
 
-static int save_stash(int argc, const char **argv, const char *prefix)
+static int save_stash(int argc, const char **argv, const char *prefix,
+		      struct repository *repo UNUSED)
 {
 	int keep_index = -1;
 	int only_staged = 0;
@@ -1842,7 +1885,10 @@ static int save_stash(int argc, const char **argv, const char *prefix)
 	return ret;
 }
 
-int cmd_stash(int argc, const char **argv, const char *prefix)
+int cmd_stash(int argc,
+	      const char **argv,
+	      const char *prefix,
+	      struct repository *repo)
 {
 	pid_t pid = getpid();
 	const char *index_file;
@@ -1862,6 +1908,8 @@ int cmd_stash(int argc, const char **argv, const char *prefix)
 		OPT_SUBCOMMAND_F("save", &fn, save_stash, PARSE_OPT_NOCOMPLETE),
 		OPT_END()
 	};
+	const char **args_copy;
+	int ret;
 
 	git_config(git_stash_config, NULL);
 
@@ -1873,17 +1921,28 @@ int cmd_stash(int argc, const char **argv, const char *prefix)
 	prepare_repo_settings(the_repository);
 	the_repository->settings.command_requires_full_index = 0;
 
-	index_file = get_index_file();
+	index_file = repo_get_index_file(the_repository);
 	strbuf_addf(&stash_index_path, "%s.stash.%" PRIuMAX, index_file,
 		    (uintmax_t)pid);
 
 	if (fn)
-		return !!fn(argc, argv, prefix);
+		return !!fn(argc, argv, prefix, repo);
 	else if (!argc)
-		return !!push_stash_unassumed(0, NULL, prefix);
+		return !!push_stash_unassumed(0, NULL, prefix, repo);
 
 	/* Assume 'stash push' */
 	strvec_push(&args, "push");
 	strvec_pushv(&args, argv);
-	return !!push_stash(args.nr, args.v, prefix, 1);
+
+	/*
+	 * `push_stash()` ends up modifying the array, which causes memory
+	 * leaks if we didn't copy the array here.
+	 */
+	DUP_ARRAY(args_copy, args.v, args.nr);
+
+	ret = !!push_stash(args.nr, args_copy, prefix, 1);
+
+	strvec_clear(&args);
+	free(args_copy);
+	return ret;
 }

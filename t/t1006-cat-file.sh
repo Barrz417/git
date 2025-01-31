@@ -240,7 +240,8 @@ test_expect_success "setup" '
 	git config extensions.objectformat $test_hash_algo &&
 	git config extensions.compatobjectformat $test_compat_hash_algo &&
 	echo_without_newline "$hello_content" > hello &&
-	git update-index --add hello
+	git update-index --add hello &&
+	git commit -m "add hello file"
 '
 
 run_blob_tests () {
@@ -599,6 +600,34 @@ test_expect_success FUNNYNAMES '--batch-check, -z with newline in input' '
 test_expect_success FUNNYNAMES '--batch-check, -Z with newline in input' '
 	git cat-file --batch-check -Z <in >actual &&
 	printf "%s\0" "$(git rev-parse "HEAD:newline${LF}embedded") blob 0" >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'setup with curly braches in input' '
+	git branch "foo{bar" HEAD &&
+	git branch "foo@" HEAD
+'
+
+test_expect_success 'object reference with curly brace' '
+	git cat-file -p "foo{bar:hello" >actual &&
+	git cat-file -p HEAD:hello >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'object reference with at-sign' '
+	git cat-file -p "foo@@{0}:hello" >actual &&
+	git cat-file -p HEAD:hello >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'setup with commit with colon' '
+	git commit-tree -m "testing: just a bunch of junk" HEAD^{tree} >out &&
+	git branch other $(cat out)
+'
+
+test_expect_success 'object reference via commit text search' '
+	git cat-file -p "other^{/testing:}:hello" >actual &&
+	git cat-file -p HEAD:hello >expect &&
 	test_cmp expect actual
 '
 
@@ -1292,6 +1321,36 @@ test_expect_success 'batch-command flush without --buffer' '
 	echo "flush" >cmd &&
 	test_expect_code 128 git cat-file --batch-command <cmd 2>err &&
 	grep "^fatal:.*flush is only for --buffer mode.*" err
+'
+
+script='
+use warnings;
+use strict;
+use IPC::Open2;
+my ($opt, $oid, $expect, @pfx) = @ARGV;
+my @cmd = (qw(git cat-file), $opt);
+my $pid = open2(my $out, my $in, @cmd) or die "open2: @cmd";
+print $in @pfx, $oid, "\n" or die "print $!";
+my $rvec = "";
+vec($rvec, fileno($out), 1) = 1;
+select($rvec, undef, undef, 30) or die "no response to `@pfx $oid` from @cmd";
+my $info = <$out>;
+chop($info) eq "\n" or die "no LF";
+$info eq $expect or die "`$info` != `$expect`";
+close $in or die "close in $!";
+close $out or die "close out $!";
+waitpid $pid, 0;
+$? == 0 or die "\$?=$?";
+'
+
+expect="$hello_oid blob $hello_size"
+
+test_expect_success PERL '--batch-check is unbuffered by default' '
+	perl -e "$script" -- --batch-check $hello_oid "$expect"
+'
+
+test_expect_success PERL '--batch-command info is unbuffered by default' '
+	perl -e "$script" -- --batch-command $hello_oid "$expect" "info "
 '
 
 test_done

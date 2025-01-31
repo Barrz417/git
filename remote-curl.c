@@ -1,3 +1,6 @@
+#define USE_THE_REPOSITORY_VARIABLE
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
 #include "git-compat-util.h"
 #include "git-curl-compat.h"
 #include "config.h"
@@ -345,7 +348,7 @@ static struct ref *parse_info_refs(struct discovery *heads)
 		ref->next = refs;
 		refs = ref;
 	} else {
-		free(ref);
+		free_one_ref(ref);
 	}
 
 	return refs;
@@ -939,7 +942,7 @@ static int post_rpc(struct rpc_state *rpc, int stateless_connect, int flush_rece
 		do {
 			err = probe_rpc(rpc, &results);
 			if (err == HTTP_REAUTH)
-				credential_fill(&http_auth, 0);
+				credential_fill(the_repository, &http_auth, 0);
 		} while (err == HTTP_REAUTH);
 		if (err != HTTP_OK)
 			return -1;
@@ -1061,7 +1064,7 @@ retry:
 	rpc->any_written = 0;
 	err = run_slot(slot, NULL);
 	if (err == HTTP_REAUTH && !large_request) {
-		credential_fill(&http_auth, 0);
+		credential_fill(the_repository, &http_auth, 0);
 		curl_slist_free_all(headers);
 		goto retry;
 	}
@@ -1574,7 +1577,7 @@ int cmd_main(int argc, const char **argv)
 	if (argc > 2) {
 		end_url_with_slash(&url, argv[2]);
 	} else {
-		end_url_with_slash(&url, remote->url[0]);
+		end_url_with_slash(&url, remote->url.v[0]);
 	}
 
 	http_init(remote, url.buf, 0);

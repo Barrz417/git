@@ -665,6 +665,10 @@ run_dir_diff_test 'difftool --dir-diff syncs worktree without unstaged change' '
 	test_cmp expect file
 '
 
+run_dir_diff_test 'difftool --dir-diff with no diff' '
+	git difftool -d main main
+'
+
 write_script modify-file <<\EOF
 echo "new content" >file
 EOF

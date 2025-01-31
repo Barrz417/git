@@ -7,7 +7,6 @@ test_description='Test prune and reflog expiration'
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 check_have () {
@@ -144,6 +143,14 @@ test_expect_success rewind '
 
 	git reflog refs/heads/main >output &&
 	test_line_count = 5 output
+'
+
+test_expect_success 'reflog expire should not barf on an annotated tag' '
+	test_when_finished "git tag -d v0.tag || :" &&
+	git -c core.logAllRefUpdates=always \
+		tag -a -m "tag name" v0.tag main &&
+	git reflog expire --dry-run refs/tags/v0.tag 2>err &&
+	test_grep ! "error: [Oo]bject .* not a commit" err
 '
 
 test_expect_success 'corrupt and check' '
